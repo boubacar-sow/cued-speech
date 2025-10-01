@@ -1,0 +1,33 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include GENERATION_IMPLEMENTATION.md
+include PROJECT_SUMMARY.md
+
+# Include source code
+recursive-include src/cued_speech *.py
+recursive-include src/cued_speech/data *.py *.json *.csv *.txt
+
+# Include tests
+recursive-include tests *.py
+
+# Exclude unwanted files
+exclude .coverage
+exclude .gitignore
+exclude .gitattributes
+exclude pixi.toml
+exclude pixi.lock
+exclude merci.mp4
+recursive-exclude . __pycache__
+recursive-exclude . *.py[co]
+recursive-exclude . *.so
+recursive-exclude . .DS_Store
+recursive-exclude output *
+recursive-exclude .pixi *
+recursive-exclude .pytest_cache *
+recursive-exclude htmlcov *
+recursive-exclude dist *
+recursive-exclude build *
+recursive-exclude download *
+recursive-exclude . *.zip
+recursive-exclude . *.tar.gz 

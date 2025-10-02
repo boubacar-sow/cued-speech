@@ -74,6 +74,7 @@ The cued speech generator requires French MFA models (acoustic + dictionary). Th
 
 ```bash
 # Download all required data (includes MFA French models under ./download/)
+pixi shell
 cued-speech download-data
 
 # Save the French acoustic model to MFA's model store (zip file)

@@ -197,7 +197,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-4.0.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/matplotlib-base-3.10.6-py311h0f3be63_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/montreal-forced-aligner-3.3.6-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/montreal-forced-aligner-3.3.4-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-10.8.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/moviepy-1.0.3-pyhd8ed1ab_1.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mpg123-1.32.9-hc50e24c_0.conda
@@ -3262,9 +3262,9 @@ packages:
   - pylint>=2.6.0 ; extra == 'dev'
   - pyink ; extra == 'dev'
   requires_python: '>=3.9'
-- conda: https://conda.anaconda.org/conda-forge/noarch/montreal-forced-aligner-3.3.6-pyhd8ed1ab_0.conda
-  sha256: f6d5d7f34aaf30b4027ab259b63dcb477d492ffa46d21ccadb646d8614d70b9d
-  md5: 16b47f1d474cd34690c4dcd63ca07c78
+- conda: https://conda.anaconda.org/conda-forge/noarch/montreal-forced-aligner-3.3.4-pyhd8ed1ab_0.conda
+  sha256: 13bc50f8b217fb396c99b7c5f609c95961edeb14183bf6a9245af43255db109d
+  md5: c57a56f221cb14a7e709913ef2e249ec
   depends:
   - baumwelch
   - biopython
@@ -3272,7 +3272,7 @@ packages:
   - ffmpeg
   - hdbscan
   - kaldi
-  - kalpy >=0.8
+  - kalpy
   - kneed
   - librosa
   - ngram
@@ -3286,7 +3286,7 @@ packages:
   - psycopg2
   - pynini
   - pysoundfile
-  - python >=3.10
+  - python >=3.9
   - pyyaml
   - requests
   - rich
@@ -3300,8 +3300,8 @@ packages:
   license_family: MIT
   purls:
   - pkg:pypi/montreal-forced-aligner?source=hash-mapping
-  size: 11567614
-  timestamp: 1758832609586
+  size: 11569528
+  timestamp: 1754021085023
 - conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-10.8.0-pyhd8ed1ab_0.conda
   sha256: fabe81c8f8f3e1d0ef227fc1306526c76189b3f1175f12302c707e0972dd707c
   md5: d7620a15dc400b448e1c88a981b23ddd

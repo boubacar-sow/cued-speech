@@ -37,6 +37,12 @@ QUEUE_MAXSIZE = 10
 INFERENCE_BUFFER_SIZE = 5
 INFERENCE_INTERVAL = 15
 
+# Overlap-save windowing parameters
+WINDOW_SIZE = 100  # Total frames processed at once
+COMMIT_SIZE = 50   # Frames we keep from each window (after first two chunks)
+LEFT_CONTEXT = 25  # Left context frames
+RIGHT_CONTEXT = 25 # Right context frames
+
 # IPA to LIAPHON mapping for French phoneme correction
 IPA_TO_LIAPHON = {
     "a": "a",
@@ -653,11 +659,23 @@ def decode_video(
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     recognition_results = deque()
 
-    # Process video frames
+    # Process video frames with real-time overlap-save windowing
     frame_count = 0
-    feature_history = []
+    valid_features = []  # Store only valid features (with all required columns)
     coordinate_buffer = deque(maxlen=INFERENCE_BUFFER_SIZE)
-
+    
+    # Required feature columns for validation
+    required_hs_cols = 7  # hand shape features
+    required_hp_cols = 18  # hand position features
+    required_lp_cols = 8   # lip features
+    
+    # Windowing state
+    all_logits = []  # Accumulated committed logits
+    chunk_idx = 0
+    next_window_needed = WINDOW_SIZE  # Number of valid frames needed for next window
+    
+    print("Processing video in real-time with overlap-save windowing...")
+    
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -700,75 +718,228 @@ def decode_video(
         prev = coordinate_buffer[-2] if len(coordinate_buffer) >= 2 else None
         prev2 = coordinate_buffer[-3] if len(coordinate_buffer) >= 3 else None
         features = extract_features_single_row(row, prev, prev2)
-
-        # Append to feature history
-        feature_history.append(features)
-
-        # Run inference every INFERENCE_INTERVAL frames
-        if frame_count % INFERENCE_INTERVAL == 0 and len(feature_history) > 0:
-            # Take the last M frames (like ACSR)
-            chunk = list(feature_history)
+        
+        # Validate features - check if we have all required feature columns
+        if features:
+            # Count feature types
+            hs_count = sum(1 for k in features.keys() if 'hand' in k and 'face' not in k)
+            hp_count = sum(1 for k in features.keys() if 'face' in k)
+            lp_count = sum(1 for k in features.keys() if 'lip' in k)
             
-            # Convert to DataFrame like ACSR
-            df = pd.DataFrame(chunk).dropna()
-            if df.empty:
-                continue
-
+            # Only add if we have all required features
+            if hs_count == required_hs_cols and hp_count == required_hp_cols and lp_count == required_lp_cols:
+                valid_features.append(features)
+            else:
+                # Frame dropped - missing features
+                if frame_count % 30 == 0:  # Log occasionally
+                    print(f"Frame {frame_count}: Dropped (incomplete features: hs={hs_count}, hp={hp_count}, lp={lp_count})")
+        
+        # Check if we have enough valid frames to process a window
+        num_valid = len(valid_features)
+        
+        if num_valid >= next_window_needed:
+            # Determine window boundaries based on chunk index
+            if chunk_idx == 0:
+                # First chunk: frames 0-99, commit 0-49
+                window_start = 0
+                window_end = min(WINDOW_SIZE - 1, num_valid - 1)
+                commit_start = 0
+                commit_end = min(COMMIT_SIZE - 1, num_valid - 1)
+                next_window_needed = LEFT_CONTEXT + WINDOW_SIZE  # 125
+            elif chunk_idx == 1:
+                # Second chunk: frames 25-124, commit 50-74
+                window_start = LEFT_CONTEXT
+                window_end = min(window_start + WINDOW_SIZE - 1, num_valid - 1)
+                commit_start = COMMIT_SIZE
+                commit_end = min(commit_start + LEFT_CONTEXT - 1, num_valid - 1)
+                next_window_needed = COMMIT_SIZE + WINDOW_SIZE  # 150
+            else:
+                # Regular chunks (2+): window starts at 50, 100, 150, etc.
+                window_start = COMMIT_SIZE * (chunk_idx - 1)
+                window_end = min(window_start + WINDOW_SIZE - 1, num_valid - 1)
+                commit_start = window_start + LEFT_CONTEXT
+                commit_end = min(commit_start + COMMIT_SIZE - 1, num_valid - 1)
+                next_window_needed = COMMIT_SIZE * chunk_idx + WINDOW_SIZE  # +50 each time
+            
+            print(f"\n[Valid frames: {num_valid}] Chunk {chunk_idx}: window=[{window_start}, {window_end}], commit=[{commit_start}, {commit_end}]")
+            
+            # Extract features for this window
+            window_features = valid_features[window_start:window_end + 1]
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(window_features)
+            
             # Prepare inputs
             hs_cols = [c for c in df.columns if 'hand' in c and 'face' not in c]
             hp_cols = [c for c in df.columns if 'face' in c]
             lp_cols = [c for c in df.columns if 'lip' in c]
 
-            if len(hs_cols) != 7 or len(hp_cols) != 18 or len(lp_cols) != 8:
-                print(f"Warning: Unexpected feature dims - hs:{len(hs_cols)}, hp:{len(hp_cols)}, lp:{len(lp_cols)}")
-                continue
-
             Xhs = torch.tensor(df[hs_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
             Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
             Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
 
-            # Forward pass over the chunk
+            # Forward pass over the window
             with torch.no_grad():
-                logits = model(Xhs, Xhp, Xlp)[0]  # (T_chunk, V)
-                log_probs = F.log_softmax(logits, dim=1)
+                window_logits = model(Xhs, Xhp, Xlp)[0]  # (T_window, V)
+            
+            # Extract logits for commit region (relative to window)
+            commit_start_rel = commit_start - window_start
+            commit_end_rel = commit_end - window_start
+            committed_logits = window_logits[commit_start_rel:commit_end_rel + 1]
+            
+            print(f"  Window logits shape: {window_logits.shape}, committed: {committed_logits.shape}")
+            
+            # Append to all_logits
+            all_logits.append(committed_logits)
+            
+            # Decode using full accumulated logits after each chunk
+            if all_logits:
+                full_logits = torch.cat(all_logits, dim=0)  # (total_committed_frames, V)
+                print(f"  Full accumulated logits shape: {full_logits.shape}")
+                
+                # Apply log_softmax
+                log_probs = F.log_softmax(full_logits, dim=1)
+                
+                # Beam decode on full accumulated log_probs
+                beam_results = beam_decoder(log_probs.unsqueeze(0))
+                if beam_results and beam_results[0]:
+                    best = beam_results[0][0]
+                    pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
+                    if len(pred_tokens) > 0: 
+                        if pred_tokens[-1] == '_': 
+                            pred_tokens = pred_tokens[:-1] 
+                else:
+                    # fallback greedy
+                    argmax = log_probs.argmax(dim=1).tolist()
+                    pred_tokens = [index_to_phoneme[i] for i, _ in groupby(argmax) if i != phoneme_to_index['<BLANK>']]
 
-            # Greedy baseline: remove blanks and repeats
-            greedy_idxs = log_probs.argmax(axis=-1)
-            greedy = []
-            prev = None
-            for idx in greedy_idxs:
-                ph = index_to_phoneme[idx.item()]
-                if ph == '<BLANK>' or idx == prev:
-                    prev = idx
-                    continue
-                greedy.append(ph)
-                prev = idx
-
-            print("Number of frames: ", Xlp.size(1))
-            print("Greedy decoded:", greedy)
-
-            # Beam decode on these log_probs
-            results = beam_decoder(log_probs.unsqueeze(0))
-            if results and results[0]:
-                best = results[0][0]
-                pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
-                if len(pred_tokens) > 0: 
-                    if pred_tokens[-1] == '_': 
-                        pred_tokens = pred_tokens[:-1] 
+                print(f"  Decoded sentence after chunk {chunk_idx}: {pred_tokens}")
+                
+                # Update recognition results with latest decoding
+                if pred_tokens:
+                    # Remove previous result if exists
+                    if recognition_results:
+                        recognition_results.clear()
+                    recognition_results.append({
+                        'frame': frame_count,
+                        'phonemes': pred_tokens,
+                    })
+            
+            chunk_idx += 1
+    
+    # Process final chunk if we have uncommitted valid frames
+    num_valid = len(valid_features)
+    if num_valid > 0:
+        # Calculate how many frames have been committed so far
+        if chunk_idx == 0:
+            frames_committed = 0
+        elif chunk_idx == 1:
+            frames_committed = COMMIT_SIZE  # 50
+        else:
+            frames_committed = COMMIT_SIZE + LEFT_CONTEXT + (chunk_idx - 2) * COMMIT_SIZE  # 75 + 50*(chunk_idx-2)
+        
+        if frames_committed < num_valid:
+            # We have uncommitted frames - process final chunk
+            print(f"\n[Video ended] Processing final chunk with {num_valid - frames_committed} uncommitted frames")
+            
+            # Determine window for final chunk
+            if chunk_idx == 0:
+                # Very short video - process all we have
+                window_start = 0
+                window_end = num_valid - 1
+                commit_start = 0
+                commit_end = num_valid - 1
+            elif chunk_idx == 1:
+                # Second chunk as final
+                window_start = LEFT_CONTEXT
+                window_end = num_valid - 1
+                commit_start = COMMIT_SIZE
+                commit_end = num_valid - 1
             else:
-                # fallback greedy
-                argmax = log_probs.argmax(dim=1).tolist()
-                pred_tokens = [index_to_phoneme[i] for i, _ in groupby(argmax) if i != phoneme_to_index['<BLANK>']]
+                # Regular final chunk
+                window_start = COMMIT_SIZE * (chunk_idx - 1)
+                window_end = num_valid - 1
+                commit_start = window_start + LEFT_CONTEXT
+                commit_end = num_valid - 1
+            
+            # Need to have enough frames for a meaningful window
+            if window_end - window_start + 1 >= LEFT_CONTEXT:  # At least 25 frames
+                print(f"Final chunk {chunk_idx}: window=[{window_start}, {window_end}], commit=[{commit_start}, {commit_end}]")
+                
+                window_features = valid_features[window_start:window_end + 1]
+                
+                # Pad if needed to reach minimum window size
+                window_size_actual = len(window_features)
+                if window_size_actual < WINDOW_SIZE:
+                    padding_needed = WINDOW_SIZE - window_size_actual
+                    zero_feature = {k: 0.0 for k in window_features[0].keys()}
+                    window_features.extend([zero_feature] * padding_needed)
+                    print(f"  Padded final window with {padding_needed} zero frames")
+                
+                # Convert to DataFrame
+                df = pd.DataFrame(window_features)
+                
+                # Prepare inputs
+                hs_cols = [c for c in df.columns if 'hand' in c and 'face' not in c]
+                hp_cols = [c for c in df.columns if 'face' in c]
+                lp_cols = [c for c in df.columns if 'lip' in c]
 
-            # Output
-            frame_id = len(chunk)
-            print(f"Decoded up to frame {frame_id}: {pred_tokens}")
+                Xhs = torch.tensor(df[hs_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+                Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+                Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
 
-            if pred_tokens:
-                recognition_results.append({
-                    'frame': frame_id,
-                    'phonemes': pred_tokens,
-                })
+                # Forward pass over the window
+                with torch.no_grad():
+                    window_logits = model(Xhs, Xhp, Xlp)[0]  # (T_window, V)
+                
+                # Extract logits for commit region (relative to window)
+                commit_start_rel = commit_start - window_start
+                commit_end_rel = min(commit_end - window_start, window_size_actual - 1)
+                committed_logits = window_logits[commit_start_rel:commit_end_rel + 1]
+                
+                print(f"  Final window logits shape: {window_logits.shape}, committed: {committed_logits.shape}")
+                
+                # Append to all_logits
+                all_logits.append(committed_logits)
+                
+                # Decode using full accumulated logits after final chunk
+                if all_logits:
+                    full_logits = torch.cat(all_logits, dim=0)  # (total_committed_frames, V)
+                    print(f"  Final full accumulated logits shape: {full_logits.shape}")
+                    
+                    # Apply log_softmax
+                    log_probs = F.log_softmax(full_logits, dim=1)
+                    
+                    # Beam decode on full accumulated log_probs
+                    beam_results = beam_decoder(log_probs.unsqueeze(0))
+                    if beam_results and beam_results[0]:
+                        best = beam_results[0][0]
+                        pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
+                        if len(pred_tokens) > 0: 
+                            if pred_tokens[-1] == '_': 
+                                pred_tokens = pred_tokens[:-1] 
+                    else:
+                        # fallback greedy
+                        argmax = log_probs.argmax(dim=1).tolist()
+                        pred_tokens = [index_to_phoneme[i] for i, _ in groupby(argmax) if i != phoneme_to_index['<BLANK>']]
+
+                    print(f"  Final decoded sentence: {pred_tokens}")
+                    
+                    # Update recognition results with final decoding
+                    if pred_tokens:
+                        # Remove previous result if exists
+                        if recognition_results:
+                            recognition_results.clear()
+                        recognition_results.append({
+                            'frame': frame_count,
+                            'phonemes': pred_tokens,
+                        })
+    
+    print(f"\nTotal valid frames: {len(valid_features)} (out of {frame_count} total frames)")
+    print(f"Total chunks processed: {len(all_logits)}")
+    
+    if not all_logits:
+        print("No valid frames to decode")
 
     cap.release()
     holistic.close()

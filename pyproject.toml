@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cued_speech"
-version = "0.1.0"
+version = "0.2.51"
 description = "Cued Speech Processing Tools - Decode and Generate cued speech videos"
 readme = "README.md"
 license = "MIT"
@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: Multimedia :: Video",
     "Topic :: Software Development :: Libraries :: Python Modules"
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "click",
     "numpy>=1.24,<2.0",
@@ -61,10 +61,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bsow/cued-speech"
-Documentation = "https://github.com/bsow/cued-speech#readme"
-Repository = "https://github.com/bsow/cued-speech"
-"Bug Tracker" = "https://github.com/bsow/cued-speech/issues"
+Homepage = "https://github.com/boubacar-sow/cued-speech"
+Documentation = "https://github.com/boubacar-sow/cued-speechblob/main/README.md"
+Repository = "https://github.com/boubacar-sow/cued-speech"
+"Bug Tracker" = "https://github.com/boubacar-sow/cued-speech/issues"
 
 [project.scripts]
 cued-speech = "cued_speech.cli:cli"

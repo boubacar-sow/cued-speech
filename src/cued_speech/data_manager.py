@@ -31,7 +31,9 @@ EXPECTED_FILES = {
     "ipa_to_french": "ipa_to_french.csv",
     "test_decode": "test_decode.mp4",
     "test_generate": "test_generate.mp4",
-    "yellow_pixels": "yellow_pixels.csv"
+    "yellow_pixels": "yellow_pixels.csv",
+    "french_mfa_dictionary": "french_mfa_dictionary.zip",
+    "french_mfa_acoustic": "french_mfa_acoustic.zip"
 }
 
 # Expected directories in the download

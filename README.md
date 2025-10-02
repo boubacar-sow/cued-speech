@@ -33,9 +33,8 @@ A comprehensive Python package for processing cued speech videos with both decod
 
 ### Prerequisites
 
-- Python 3.11 or higher
+- Python 3.11.*
 - Pixi (to install Montreal Forced Aligner)
-- Optional: ffmpeg in PATH for video/audio handling
 
 ### Install with Pixi (Recommended)
 
@@ -69,9 +68,29 @@ pixi run mfa --version
 pixi run python -m pip install cued-speech
 ```
 
-#### 4) Verify and see available options
+#### 4) Prepare French MFA Models (Required for Generation)
+
+The cued speech generator requires French MFA models (acoustic + dictionary). These are now bundled with the data downloaded by the package. Just download the data, then save the models with MFA:
+
 ```bash
-pixi run cued-speech
+# Download all required data (includes MFA French models under ./download/)
+cued-speech download-data
+
+# Save the French acoustic model to MFA's model store (zip file)
+pixi run mfa models save acoustic download/french_mfa.zip --overwrite
+
+# Save the French dictionary model to MFA's model store (.dict file)
+pixi run mfa models save dictionary download/french_mfa.dict --overwrite
+```
+
+Note:
+- You can run the above inside a Pixi shell (`pixi shell`) or prefix with `pixi run` as shown.
+- After saving, MFA will manage models in its own cache (e.g., `~/.local/share/mfa/models/`).
+
+#### 5) Verify installation and see available options
+```bash
+pixi shell
+cued-speech
 ```
 
 ## Data Setup
@@ -83,8 +102,8 @@ The package requires several model files and data for operation. These are autom
 You can manage data files manually using the provided commands:
 
 ```bash
-# Download all required data files
-cued-speech download-data
+# Download all required data files, verify that you are in the pixi environment
+cued-speech download-data 
 
 # List available data files
 cued-speech list-data
@@ -106,7 +125,8 @@ The following files are automatically downloaded to a `download/` folder in your
 - `test_decode.mp4` - Sample video for testing
 - `test_generate.mp4` - Sample video for generation
 - `rotated_images/` - Directory containing hand shape images for generation
-
+- `french_mfa.dict` - MFA dictionary
+- `french_mfa.zip` - MFA acoustic model
 **Note:** Data files are stored in `./download/` relative to where you run the commands, making them easy to find and manage.
 
 ## Usage
@@ -114,6 +134,8 @@ The following files are automatically downloaded to a `download/` folder in your
 ### Command Line Interface
 
 The package provides a comprehensive command-line interface for both decoding and generating cued speech videos:
+
+Note: The models are designed for videos at 30 FPS. For best results, use input videos that are 30 FPS.
 
 #### Decoding (Cued Speech → Text)
 

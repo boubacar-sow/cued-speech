@@ -132,12 +132,12 @@ def decode(video_path, right_speaker, model_path, output_path, vocab_path,
 @click.option("--audio_path", default=None, help="Path to audio file (optional, will extract from video if not provided)")
 @click.option("--language", default="french", help="Language for speech processing")
 @click.option("--skip-whisper", is_flag=True, help="Skip Whisper transcription (requires --text to be provided)")
-@click.option("--easing", default="ease_in_out_cubic", 
+@click.option("--easing", default="linear", 
               type=click.Choice(["linear", "ease_in_out_cubic", "ease_out_elastic", "ease_in_out_back"]),
               help="Easing function for gesture transitions")
-@click.option("--morphing/--no-morphing", default=True, help="Enable/disable hand shape morphing")
-@click.option("--transparency/--no-transparency", default=True, help="Enable/disable transparency effects")
-@click.option("--curving/--no-curving", default=True, help="Enable/disable curved trajectories")
+@click.option("--morphing/--no-morphing", default=False, help="Enable/disable hand shape morphing")
+@click.option("--transparency/--no-transparency", default=False, help="Enable/disable transparency effects")
+@click.option("--curving/--no-curving", default=False, help="Enable/disable curved trajectories")
 def generate(video_path, text, output_path, audio_path, language, skip_whisper, 
             easing, morphing, transparency, curving):
     """

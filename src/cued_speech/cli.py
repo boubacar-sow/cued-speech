@@ -132,14 +132,14 @@ def decode(video_path, right_speaker, model_path, output_path, vocab_path,
 @click.option("--audio_path", default=None, help="Path to audio file (optional, will extract from video if not provided)")
 @click.option("--language", default="french", help="Language for speech processing")
 @click.option("--skip-whisper", is_flag=True, help="Skip Whisper transcription (requires --text to be provided)")
-@click.option("--whisper_download_root", default=None, help="Directory to cache/download Whisper models")
+@click.option("--whisper_model", default=None, help="(Deprecated) CLI cannot pass model objects; use Python API to pass a loaded model")
 @click.option("--easing", default="linear", 
               type=click.Choice(["linear", "ease_in_out_cubic", "ease_out_elastic", "ease_in_out_back"]),
               help="Easing function for gesture transitions")
 @click.option("--morphing/--no-morphing", default=False, help="Enable/disable hand shape morphing")
 @click.option("--transparency/--no-transparency", default=False, help="Enable/disable transparency effects")
 @click.option("--curving/--no-curving", default=False, help="Enable/disable curved trajectories")
-def generate(video_path, text, output_path, audio_path, language, skip_whisper, whisper_download_root,
+def generate(video_path, text, output_path, audio_path, language, skip_whisper, whisper_model,
             easing, morphing, transparency, curving):
     """
     Generate cued speech video from a video file.
@@ -190,7 +190,7 @@ def generate(video_path, text, output_path, audio_path, language, skip_whisper, 
             "audio_codec": "aac",
             "min_display_duration": 0.4,
             "skip_whisper": skip_whisper,  # Pass the flag to the generator
-            "whisper_download_root": whisper_download_root,
+            "whisper_model": whisper_model,
             "easing_function": easing,
             "enable_morphing": morphing,
             "enable_transparency": transparency,

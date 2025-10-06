@@ -191,7 +191,7 @@ Options:
 - `--audio_path PATH` (default: None): Optional audio file (extracted from video if not provided)
 - `--language [french|...]` (default: `french`): Processing language
 - `--skip-whisper` (flag): Skip Whisper download/transcription (requires `--text`)
-- `--whisper_download_root PATH` (optional): Directory to cache/download Whisper models
+- `--whisper_model` (deprecated): Use Python API to pass a loaded model object instead
 - `--easing [linear|ease_in_out_cubic|ease_out_elastic|ease_in_out_back]` (default: `ease_in_out_cubic`): Gesture easing
 - `--morphing/--no-morphing` (default: `--morphing`): Hand shape morphing
 - `--transparency/--no-transparency` (default: `--transparency`): Transparency effects during transitions
@@ -210,8 +210,7 @@ cued-speech generate speaker_video.mp4 --audio_path custom_audio.wav
 # With different language
 cued-speech generate speaker_video.mp4 --language english
 
-# Control Whisper model cache location (pre-downloads + reuse)
-cued-speech generate speaker_video.mp4 --whisper_download_root /models/whisper
+# Prefer Python API to pass a loaded Whisper model object
 
 # With manual text (optional)
 cued-speech generate speaker_video.mp4 --text "Merci beaucoup pour votre attention"
@@ -263,31 +262,44 @@ decode_video(
 
 ```python
 from cued_speech import generate_cue
+import whisper
 
 # Generate a cued speech video (text extracted automatically)
+model = whisper.load_model("medium", download_root="download")
 result_path = generate_cue(
     text=None,  # Will be extracted from video using Whisper
-    video_path="speaker_video.mp4",
-    output_path="output/generator/generated.mp4",
+    video_path="download/test_generate.mp4",  # Required: input video path
+    output_path="output/generator/",  # Required: output video path
     audio_path=None,  # Will extract from video
     config={
+        # Configurable parameters (defaults shown), redefine only those you need to modify. 
+        # Others will be infered from the default config file.
+        "handshapes_dir": "download/handshapes/coordinates",
         "language": "french",
+        "reference_face_size": 0.3,
         "hand_scale_factor": 0.75,
-        "video_codec": "libx264",
+        "mfa_args": ["--beam", "200", "--retry_beam", "400", "--fine_tune"],
+        "video_codec": "libx265",
         "audio_codec": "aac",
-        # Control where Whisper models are cached/downloaded
-        "whisper_download_root": "/models/whisper",
-        # Skip Whisper if providing text manually
-        # "skip_whisper": True,
+        "easing_function": "linear",
+        "enable_morphing": False,
+        "enable_transparency": False,
+        "enable_curving": True,
+        "skip_whisper": True, # Only if you provide text manually, 
+        "model": model, # Provide a preloaded Whisper model (optional). If None, defaults to medium that whisper will download.
+
     }
 )
 print(f"Generated video saved to: {result_path}")
 
-# Or with manual text
+# Or with manual text (minimal config)
 result_path = generate_cue(
-    text="Bonjour tout le monde",
-    video_path="speaker_video.mp4",
-    output_path="output/generator/generated.mp4"
+    text="Merci à tous pour votre attention, vos questions sont les bienvenues",
+    video_path="download/test_generate.mp4",  # Required argument
+    output_path="output/generator/",  # Required argument
+    config={
+        "skip_whisper":True,
+    }
 )
 ```
 

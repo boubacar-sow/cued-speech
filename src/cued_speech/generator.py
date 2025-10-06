@@ -172,7 +172,15 @@ class CuedSpeechGenerator:
     
     def __init__(self, config: Optional[Dict] = None):
         """Initialize the cued speech generator."""
-        self.config = config or self._get_default_config()
+        # Always start from defaults, then selectively update with user-provided config
+        defaults = self._get_default_config()
+        self.config = dict(defaults)
+        if config:
+            for key, value in config.items():
+                if key in defaults:
+                    self.config[key] = value
+                else:
+                    logger.warning(f"Unknown config key '{key}' ignored. Valid keys: {list(defaults.keys())}")
         self.syllable_map = []
         self.current_video_frame = None
         self.current_hand_pos = None
@@ -195,12 +203,13 @@ class CuedSpeechGenerator:
             "video_codec": "libx265",
             "audio_codec": "aac",
             # New parameters for enhanced gesture generation
-            "easing_function": "ease_in_out_cubic",  # Options: linear, ease_in_out_cubic, ease_out_elastic, ease_in_out_back
-            "enable_morphing": True,  # Enable hand shape morphing
-            "enable_transparency": True,  # Enable transparency effects during transitions
+            "easing_function": "linear",  # Options: linear, ease_in_out_cubic, ease_out_elastic, ease_in_out_back
+            "enable_morphing": False,  # Enable hand shape morphing
+            "enable_transparency": False,  # Enable transparency effects during transitions
             "enable_curving": True,  # Enable curved trajectories for specific position pairs
-            # Whisper cache control
-            "whisper_download_root": None,
+            # Control whether to skip Whisper when text is provided
+            "skip_whisper": False,
+            "model": None,
         }
     
     def _validate_paths(self):
@@ -431,22 +440,13 @@ class CuedSpeechGenerator:
         video_path: str,
         output_path: str,
         audio_path: Optional[str] = None,
-        **kwargs
     ) -> str:
         """Generate cued speech video from text input using Whisper + MFA workflow."""
         try:
-            # Update config with provided paths while preserving existing config
-            if not hasattr(self, 'config') or self.config is None:
-                self.config = self._get_default_config()
-            
-            # Ensure mfa_args is preserved
-            if "mfa_args" not in self.config:
-                self.config["mfa_args"] = ["--beam", "200", "--retry_beam", "400", "--fine_tune"]
-            
-            # Update config with any new parameters from kwargs
-            for key, value in kwargs.items():
-                if key in ["easing_function", "enable_morphing", "enable_transparency", "enable_curving"]:
-                    self.config[key] = value
+            # Initialize config from defaults, then merge existing config
+            defaults = self._get_default_config()
+            base_config = self.config if hasattr(self, 'config') and self.config is not None else {}
+            self.config = {**defaults, **base_config}
             
             self.config["video_path"] = video_path
             self.config["output_dir"] = os.path.dirname(output_path)
@@ -471,7 +471,7 @@ class CuedSpeechGenerator:
                 self._timings["whisper"] = time.perf_counter() - t0
                 logger.info(f"Whisper transcription: {transcription}")
                 text = transcription
-            elif self.config.get("skip_whisper", False):
+            elif self.config.get("skip_whisper", False) and text is not None:
                 logger.info("Whisper skipped, using provided text for alignment")
                 transcription = text  # Use provided text for alignment
             else:
@@ -543,11 +543,12 @@ class CuedSpeechGenerator:
         try:
             t0 = time.perf_counter()
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            # Optionally control download/cache root
-            download_root = self.config.get("whisper_download_root")
-            if download_root:
-                os.makedirs(download_root, exist_ok=True)
-            model = whisper.load_model("medium", device=device, download_root=download_root)
+            # Use provided model object if supplied; else default to "medium"
+            model_obj = self.config.get("model")
+            if model_obj is None:
+                model = whisper.load_model("medium", device=device)
+            else:
+                model = model_obj
             result = model.transcribe(audio_path, language=self.config["language"])
             logger.info("Audio transcription completed")
             # Note: high-level whisper timing is recorded in caller
@@ -564,10 +565,11 @@ class CuedSpeechGenerator:
         try:
             # Try with a smaller model that might already be cached
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            download_root = self.config.get("whisper_download_root")
-            if download_root:
-                os.makedirs(download_root, exist_ok=True)
-            model = whisper.load_model("tiny", device=device, download_root=download_root)
+            model_obj = self.config.get("model")
+            if model_obj is None:
+                model = whisper.load_model("tiny", device=device)
+            else:
+                model = model_obj
             result = model.transcribe(audio_path, language=self.config["language"])
             logger.info("Audio transcription completed with fallback model")
             return result["text"]
@@ -1468,7 +1470,6 @@ def generate_cue(
     output_path: str,
     audio_path: Optional[str] = None,
     config: Optional[Dict] = None,
-    **kwargs
 ) -> str:
     """
     Generate cued speech video from text input or extract text from video using Whisper.
@@ -1477,4 +1478,4 @@ def generate_cue(
     For more control, use CuedSpeechGenerator directly.
     """
     generator = CuedSpeechGenerator(config)
-    return generator.generate_cue(text, video_path, output_path, audio_path, **kwargs)
+    return generator.generate_cue(text, video_path, output_path, audio_path)

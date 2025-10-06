@@ -675,7 +675,7 @@ def decode_video(
     next_window_needed = WINDOW_SIZE  # Number of valid frames needed for next window
     
     print("Processing video in real-time with overlap-save windowing...")
-    
+
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -718,7 +718,7 @@ def decode_video(
         prev = coordinate_buffer[-2] if len(coordinate_buffer) >= 2 else None
         prev2 = coordinate_buffer[-3] if len(coordinate_buffer) >= 3 else None
         features = extract_features_single_row(row, prev, prev2)
-        
+
         # Validate features - check if we have all required feature columns
         if features:
             # Count feature types
@@ -768,7 +768,7 @@ def decode_video(
             
             # Convert to DataFrame
             df = pd.DataFrame(window_features)
-            
+
             # Prepare inputs
             hs_cols = [c for c in df.columns if 'hand' in c and 'face' not in c]
             hp_cols = [c for c in df.columns if 'face' in c]
@@ -884,12 +884,12 @@ def decode_video(
                 hp_cols = [c for c in df.columns if 'face' in c]
                 lp_cols = [c for c in df.columns if 'lip' in c]
 
-                Xhs = torch.tensor(df[hs_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
-                Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
-                Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+            Xhs = torch.tensor(df[hs_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+            Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+            Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
 
                 # Forward pass over the window
-                with torch.no_grad():
+            with torch.no_grad():
                     window_logits = model(Xhs, Xhp, Xlp)[0]  # (T_window, V)
                 
                 # Extract logits for commit region (relative to window)
@@ -914,26 +914,26 @@ def decode_video(
                     beam_results = beam_decoder(log_probs.unsqueeze(0))
                     if beam_results and beam_results[0]:
                         best = beam_results[0][0]
-                        pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
-                        if len(pred_tokens) > 0: 
-                            if pred_tokens[-1] == '_': 
-                                pred_tokens = pred_tokens[:-1] 
-                    else:
-                        # fallback greedy
-                        argmax = log_probs.argmax(dim=1).tolist()
-                        pred_tokens = [index_to_phoneme[i] for i, _ in groupby(argmax) if i != phoneme_to_index['<BLANK>']]
+                pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
+                if len(pred_tokens) > 0: 
+                    if pred_tokens[-1] == '_': 
+                        pred_tokens = pred_tokens[:-1] 
+            else:
+                # fallback greedy
+                argmax = log_probs.argmax(dim=1).tolist()
+                pred_tokens = [index_to_phoneme[i] for i, _ in groupby(argmax) if i != phoneme_to_index['<BLANK>']]
 
                     print(f"  Final decoded sentence: {pred_tokens}")
-                    
+
                     # Update recognition results with final decoding
-                    if pred_tokens:
+            if pred_tokens:
                         # Remove previous result if exists
                         if recognition_results:
                             recognition_results.clear()
-                        recognition_results.append({
+                recognition_results.append({
                             'frame': frame_count,
-                            'phonemes': pred_tokens,
-                        })
+                    'phonemes': pred_tokens,
+                })
     
     print(f"\nTotal valid frames: {len(valid_features)} (out of {frame_count} total frames)")
     print(f"Total chunks processed: {len(all_logits)}")

@@ -58,8 +58,9 @@ More options: https://pixi.sh/installation/
 ```bash
 mkdir cued-speech-env && cd cued-speech-env
 pixi init
+pixi add "python==3.11"
 pixi add montreal-forced-aligner=3.3.4
-pixi run mfa --version
+pixi run mfa version
 ```
 
 #### 3) Install the cued_speech package (pip inside Pixi)
@@ -190,6 +191,7 @@ Options:
 - `--audio_path PATH` (default: None): Optional audio file (extracted from video if not provided)
 - `--language [french|...]` (default: `french`): Processing language
 - `--skip-whisper` (flag): Skip Whisper download/transcription (requires `--text`)
+- `--whisper_download_root PATH` (optional): Directory to cache/download Whisper models
 - `--easing [linear|ease_in_out_cubic|ease_out_elastic|ease_in_out_back]` (default: `ease_in_out_cubic`): Gesture easing
 - `--morphing/--no-morphing` (default: `--morphing`): Hand shape morphing
 - `--transparency/--no-transparency` (default: `--transparency`): Transparency effects during transitions
@@ -207,6 +209,9 @@ cued-speech generate speaker_video.mp4 --audio_path custom_audio.wav
 
 # With different language
 cued-speech generate speaker_video.mp4 --language english
+
+# Control Whisper model cache location (pre-downloads + reuse)
+cued-speech generate speaker_video.mp4 --whisper_download_root /models/whisper
 
 # With manual text (optional)
 cued-speech generate speaker_video.mp4 --text "Merci beaucoup pour votre attention"
@@ -269,7 +274,11 @@ result_path = generate_cue(
         "language": "french",
         "hand_scale_factor": 0.75,
         "video_codec": "libx264",
-        "audio_codec": "aac"
+        "audio_codec": "aac",
+        # Control where Whisper models are cached/downloaded
+        "whisper_download_root": "/models/whisper",
+        # Skip Whisper if providing text manually
+        # "skip_whisper": True,
     }
 )
 print(f"Generated video saved to: {result_path}")
@@ -307,6 +316,25 @@ The decoder uses a three-stream fusion encoder:
 - **Hand Shape Stream**: Processes hand landmark positions and geometric features
 - **Hand Position Stream**: Analyzes hand movement and positioning
 - **Lips Stream**: Extracts lip movement and facial features
+
+##### Real-Time Decoding with Overlap-Save Windowing
+
+The decoder implements a real-time processing strategy using an overlap-save method that maintains full bidirectional context while enabling streaming inference:
+
+**Windowing Parameters:**
+- Window Size: 100 frames (processed at once)
+- Commit Size: 50 frames (kept from each window after first two chunks)
+- Context: 25 frames left + 25 frames right
+
+**Processing Strategy:**
+1. **Valid Frame Filtering**: Only frames with complete features (hand visible, face detected) are counted and processed
+2. **Chunk Processing**: 
+   - Chunk 0: Process frames [0-99], commit [0-49] (0L/50R context)
+   - Chunk 1: Process frames [25-124], commit [50-74] (25L/50R context)
+   - Chunk 2+: Process frames [50, 100, 150...], commit center 50 frames with full 25L/25R context
+3. **Incremental Decoding**: After each chunk, decode using the full accumulated logits history for progressive sentence refinement
+4. **Bidirectional Context**: All committed frames (except first 50 and final chunk) have full bidirectional context for optimal accuracy
+
 
 #### Generator Architecture
 The generator follows a multi-stage pipeline:

@@ -1,0 +1,265 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1759743767.215271 2352084 gl_context_egl.cc:85] Successfully initialized EGL. Major : 1 Minor: 5
+I0000 00:00:1759743767.331175 2352164 gl_context.cc:369] GL version: 3.2 (OpenGL ES 3.2 NVIDIA 565.57.01), renderer: NVIDIA A40/PCIe/SSE2
+I0000 00:00:1759743767.335902 2352084 gl_context_egl.cc:85] Successfully initialized EGL. Major : 1 Minor: 5
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+W0000 00:00:1759743767.355056 2352123 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1759743767.372389 2352129 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+I0000 00:00:1759743767.399229 2352173 gl_context.cc:369] GL version: 3.2 (OpenGL ES 3.2 NVIDIA 565.57.01), renderer: NVIDIA A40/PCIe/SSE2
+2025-10-06 11:42:47,399 - INFO - 🔧 MediaPipe Configuration:
+2025-10-06 11:42:47,400 - INFO -    FaceMesh: static_image_mode=False, max_num_faces=1, min_detection_confidence=0.3, min_tracking_confidence=0.3
+2025-10-06 11:42:47,400 - INFO -    FaceDetection: model_selection=1 (full-range), min_detection_confidence=0.3
+2025-10-06 11:42:47,412 - INFO - SSL context configured for Whisper downloads
+W0000 00:00:1759743767.427062 2352169 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+🎬 Starting cued speech generation - extracting text from video using Whisper...
+📁 Data directory: /pasteur/appa/homes/bsow/cued_speech/download
+📹 Video path: download/test_generate.mp4
+2025-10-06 11:42:47,440 - INFO - 🔍 Testing MediaPipe face detection on video...
+2025-10-06 11:42:47,665 - INFO - 📹 Video info: 287 frames, 30.04 FPS, 9.55s duration
+2025-10-06 11:42:47,665 - INFO - 🧪 Testing face detection on 100 frames...
+W0000 00:00:1759743767.764183 2352125 landmark_projection_calculator.cc:186] Using NORM_RECT without IMAGE_DIMENSIONS is only supported for the square ROI. Provide IMAGE_DIMENSIONS or use PROJECTION_MATRIX.
+2025-10-06 11:42:47,926 - INFO -    Progress: 20/100 frames, detection rate: 100.0%
+2025-10-06 11:42:48,081 - INFO -    Progress: 40/100 frames, detection rate: 100.0%
+2025-10-06 11:42:48,247 - INFO -    Progress: 60/100 frames, detection rate: 100.0%
+2025-10-06 11:42:48,405 - INFO -    Progress: 80/100 frames, detection rate: 100.0%
+2025-10-06 11:42:48,591 - INFO -    Progress: 100/100 frames, detection rate: 100.0%
+2025-10-06 11:42:48,598 - INFO - 📊 MediaPipe Face Detection Test Results:
+2025-10-06 11:42:48,598 - INFO -    Frames tested: 100
+2025-10-06 11:42:48,598 - INFO -    Frames with face detected: 100
+2025-10-06 11:42:48,598 - INFO -    Detection rate: 100.0%
+2025-10-06 11:42:48,599 - INFO - 🎉 Excellent face detection rate (100.0%)
+2025-10-06 11:42:48,599 - INFO - ✅ MediaPipe face detection test completed
+MoviePy - Writing audio in output/generator/temp/audio.wav
+chunk:   0%|          | 0/212 [00:00<?, ?it/s, now=None]chunk:  72%|███████▏  | 153/212 [00:00<00:00, 1529.19it/s, now=None]                                                                    2025-10-06 11:42:50,365 - INFO - Audio extracted to temporary location
+2025-10-06 11:42:50,365 - INFO - No text provided, extracting from video using Whisper...
+2025-10-06 11:43:01,660 - INFO - Audio transcription completed
+2025-10-06 11:43:01,662 - INFO - Whisper transcription:  Merci à tous pour votre attention. Vos questions sont les bienvenues.
+2025-10-06 11:43:01,662 - INFO - 🎯 Step 3: Starting MFA alignment and syllable building...
+2025-10-06 11:43:01,662 - INFO - 🔄 Starting MFA alignment and syllable building...
+2025-10-06 11:43:01,663 - INFO - 📝 Running MFA alignment...
+2025-10-06 11:43:12,049 - INFO - Found MFA in pixi environment: .pixi/envs/default/bin/mfa
+2025-10-06 11:43:12,102 - INFO - Running MFA command: .pixi/envs/default/bin/mfa align output/generator/temp/mfa_input french_mfa french_mfa output/generator/temp --clean --beam 200 --retry_beam 400 --fine_tune --num_jobs 8
+2025-10-06 11:44:18,617 - INFO - MFA alignment successful:    1%                                      1/100  [ 0:00:01 < -:--:-- , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:01 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:10 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:01 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:01 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:01 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:01 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:01 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:01 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:01 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:02 < 0:00:00 , ? it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1  [ 0:00:00 < 0:00:00 , ? it/s ]
+
+2025-10-06 11:44:18,617 - INFO - ✅ MFA alignment completed, TextGrid saved to: output/generator/temp/audio.TextGrid
+2025-10-06 11:44:18,617 - INFO - 📊 Parsing TextGrid to build syllable map...
+2025-10-06 11:44:18,617 - INFO - 📊 Parsing TextGrid file: output/generator/temp/audio.TextGrid
+2025-10-06 11:44:18,617 - INFO - 📖 Opening TextGrid file...
+2025-10-06 11:44:18,624 - INFO - 📋 Found 42 phone entries in TextGrid
+2025-10-06 11:44:18,624 - INFO - 🔄 Processing phone entries to build syllables...
+2025-10-06 11:44:18,625 - INFO -    Phone 0: 'm' (2.164-2.266)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable: 'mɛ' from 'm' + 'ɛ'
+2025-10-06 11:44:18,625 - INFO -    Phone 2: 'ʁ' (2.332-2.391)
+2025-10-06 11:44:18,625 - INFO -      -> Created consonant syllable: 'ʁ'
+2025-10-06 11:44:18,625 - INFO -    Phone 3: 's' (2.391-2.524)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable: 'si' from 's' + 'i'
+2025-10-06 11:44:18,625 - INFO -    Phone 5: 'a' (2.632-2.744)
+2025-10-06 11:44:18,625 - INFO -      -> Created vowel syllable: 'a'
+2025-10-06 11:44:18,625 - INFO -    Processing phone 6/42 (iteration 5)
+2025-10-06 11:44:18,625 - INFO -    Phone 6: 't' (2.744-2.786)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable: 'tu' from 't' + 'u'
+2025-10-06 11:44:18,625 - INFO -    Phone 8: 's' (2.957-3.183)
+2025-10-06 11:44:18,625 - INFO -      -> Created consonant syllable: 's'
+2025-10-06 11:44:18,625 - INFO -    Phone 9: 'p' (3.314-3.346)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable: 'pu' from 'p' + 'u'
+2025-10-06 11:44:18,625 - INFO -    Phone 11: 'ʁ' (3.444-3.554)
+2025-10-06 11:44:18,625 - INFO -      -> Created consonant syllable: 'ʁ'
+2025-10-06 11:44:18,625 - INFO -    Phone 12: 'v' (3.554-3.621)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable: 'vɔ' from 'v' + 'ɔ'
+2025-10-06 11:44:18,625 - INFO -    Processing phone 14/42 (iteration 10)
+2025-10-06 11:44:18,625 - INFO -    Phone 14: 't' (3.724-3.776)
+2025-10-06 11:44:18,625 - INFO -      -> Created consonant syllable: 't'
+2025-10-06 11:44:18,625 - INFO -    Phone 15: 'ʁ' (3.776-3.986)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable: 'ʁə' from 'ʁ' + 'ə'
+2025-10-06 11:44:18,625 - INFO -    Phone 17: 'a' (4.094-4.134)
+2025-10-06 11:44:18,625 - INFO -      -> Created vowel syllable: 'a'
+2025-10-06 11:44:18,625 - INFO -    Phone 18: 't' (4.134-4.206)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable (nasal): 'tɑ̃' from 't' + 'ɑ̃'
+2025-10-06 11:44:18,625 - INFO -    Phone 20: 's' (4.324-4.436)
+2025-10-06 11:44:18,625 - INFO -      -> Created consonant syllable: 's'
+2025-10-06 11:44:18,625 - INFO -    Processing phone 21/42 (iteration 15)
+2025-10-06 11:44:18,625 - INFO -    Phone 21: 'j' (4.436-4.486)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable (nasal): 'jɔ̃' from 'j' + 'ɔ̃'
+2025-10-06 11:44:18,625 - INFO -    Phone 23: 'v' (5.312-5.441)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable: 'vo' from 'v' + 'o'
+2025-10-06 11:44:18,625 - INFO -    Phone 25: 'c' (5.564-5.626)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable: 'cɛ' from 'c' + 'ɛ'
+2025-10-06 11:44:18,625 - INFO -    Phone 27: 's' (5.724-5.844)
+2025-10-06 11:44:18,625 - INFO -      -> Created consonant syllable: 's'
+2025-10-06 11:44:18,625 - INFO -    Phone 28: 't' (5.844-5.906)
+2025-10-06 11:44:18,625 - INFO -      -> Created consonant syllable: 't'
+2025-10-06 11:44:18,625 - INFO -    Processing phone 29/42 (iteration 20)
+2025-10-06 11:44:18,625 - INFO -    Phone 29: 'j' (5.906-5.966)
+2025-10-06 11:44:18,625 - INFO -      -> Created CV syllable (nasal): 'jɔ̃' from 'j' + 'ɔ̃'
+2025-10-06 11:44:18,626 - INFO -    Phone 31: 's' (6.294-6.476)
+2025-10-06 11:44:18,626 - INFO -      -> Created CV syllable (nasal): 'sɔ̃' from 's' + 'ɔ̃'
+2025-10-06 11:44:18,626 - INFO -    Phone 33: 'l' (6.664-6.736)
+2025-10-06 11:44:18,626 - INFO -      -> Created CV syllable: 'le' from 'l' + 'e'
+2025-10-06 11:44:18,626 - INFO -    Phone 35: 'b' (6.963-7.036)
+2025-10-06 11:44:18,626 - INFO -      -> Created consonant syllable: 'b'
+2025-10-06 11:44:18,626 - INFO -    Phone 36: 'j' (7.036-7.136)
+2025-10-06 11:44:18,626 - INFO -      -> Created CV syllable (nasal): 'jɛ̃' from 'j' + 'ɛ̃'
+2025-10-06 11:44:18,626 - INFO -    Processing phone 38/42 (iteration 25)
+2025-10-06 11:44:18,626 - INFO -    Phone 38: 'v' (7.224-7.356)
+2025-10-06 11:44:18,626 - INFO -      -> Created CV syllable: 'və' from 'v' + 'ə'
+2025-10-06 11:44:18,626 - INFO -    Phone 40: 'n' (7.404-7.482)
+2025-10-06 11:44:18,626 - INFO -      -> Created CV syllable: 'ny' from 'n' + 'y'
+2025-10-06 11:44:18,626 - INFO - ✅ Phone processing completed: 26 syllables created from 42 phones
+2025-10-06 11:44:18,626 - INFO - 📋 Created syllables:
+2025-10-06 11:44:18,626 - INFO -    0: 'mɛ' (2.164-2.332)
+2025-10-06 11:44:18,626 - INFO -    1: 'ʁ' (2.332-2.391)
+2025-10-06 11:44:18,626 - INFO -    2: 'si' (2.391-2.632)
+2025-10-06 11:44:18,626 - INFO -    3: 'a' (2.632-2.744)
+2025-10-06 11:44:18,626 - INFO -    4: 'tu' (2.744-2.957)
+2025-10-06 11:44:18,626 - INFO -    5: 's' (2.957-3.183)
+2025-10-06 11:44:18,626 - INFO -    6: 'pu' (3.314-3.444)
+2025-10-06 11:44:18,626 - INFO -    7: 'ʁ' (3.444-3.554)
+2025-10-06 11:44:18,626 - INFO -    8: 'vɔ' (3.554-3.724)
+2025-10-06 11:44:18,626 - INFO -    9: 't' (3.724-3.776)
+2025-10-06 11:44:18,626 - INFO -    10: 'ʁə' (3.776-4.094)
+2025-10-06 11:44:18,626 - INFO -    11: 'a' (4.094-4.134)
+2025-10-06 11:44:18,626 - INFO -    12: 'tɑ̃' (4.134-4.324)
+2025-10-06 11:44:18,626 - INFO -    13: 's' (4.324-4.436)
+2025-10-06 11:44:18,626 - INFO -    14: 'jɔ̃' (4.436-4.596)
+2025-10-06 11:44:18,626 - INFO -    15: 'vo' (5.312-5.564)
+2025-10-06 11:44:18,626 - INFO -    16: 'cɛ' (5.564-5.724)
+2025-10-06 11:44:18,626 - INFO -    17: 's' (5.724-5.844)
+2025-10-06 11:44:18,626 - INFO -    18: 't' (5.844-5.906)
+2025-10-06 11:44:18,626 - INFO -    19: 'jɔ̃' (5.906-6.211)
+2025-10-06 11:44:18,626 - INFO -    20: 'sɔ̃' (6.294-6.664)
+2025-10-06 11:44:18,626 - INFO -    21: 'le' (6.664-6.918)
+2025-10-06 11:44:18,626 - INFO -    22: 'b' (6.963-7.036)
+2025-10-06 11:44:18,626 - INFO -    23: 'jɛ̃' (7.036-7.224)
+2025-10-06 11:44:18,626 - INFO -    24: 'və' (7.224-7.404)
+2025-10-06 11:44:18,626 - INFO -    25: 'ny' (7.404-7.676)
+2025-10-06 11:44:18,626 - INFO - mɛ 2.164 2.332
+2025-10-06 11:44:18,626 - INFO - ʁ 2.332 2.391
+2025-10-06 11:44:18,626 - INFO - si 2.391 2.632
+2025-10-06 11:44:18,626 - INFO - a 2.632 2.744
+2025-10-06 11:44:18,627 - INFO - tu 2.744 2.957
+2025-10-06 11:44:18,627 - INFO - s 2.957 3.183
+2025-10-06 11:44:18,627 - INFO - pu 3.314 3.444
+2025-10-06 11:44:18,627 - INFO - ʁ 3.444 3.554
+2025-10-06 11:44:18,627 - INFO - vɔ 3.554 3.724
+2025-10-06 11:44:18,627 - INFO - t 3.724 3.776
+2025-10-06 11:44:18,627 - INFO - ʁə 3.776 4.094
+2025-10-06 11:44:18,627 - INFO - a 4.094 4.134
+2025-10-06 11:44:18,627 - INFO - tɑ̃ 4.134 4.324
+2025-10-06 11:44:18,627 - INFO - s 4.324 4.436
+2025-10-06 11:44:18,627 - INFO - jɔ̃ 4.436 4.596
+2025-10-06 11:44:18,627 - INFO - vo 5.312 5.564
+2025-10-06 11:44:18,627 - INFO - cɛ 5.564 5.724
+2025-10-06 11:44:18,627 - INFO - s 5.724 5.844
+2025-10-06 11:44:18,627 - INFO - t 5.844 5.906
+2025-10-06 11:44:18,627 - INFO - jɔ̃ 5.906 6.211
+2025-10-06 11:44:18,627 - INFO - sɔ̃ 6.294 6.664
+2025-10-06 11:44:18,627 - INFO - le 6.664 6.918
+2025-10-06 11:44:18,627 - INFO - b 6.963 7.036
+2025-10-06 11:44:18,627 - INFO - jɛ̃ 7.036 7.224
+2025-10-06 11:44:18,627 - INFO - və 7.224 7.404
+2025-10-06 11:44:18,627 - INFO - ny 7.404 7.676
+2025-10-06 11:44:18,627 - INFO - ✅ TextGrid parsing completed: 26 syllables created
+2025-10-06 11:44:18,627 - INFO - ✅ TextGrid parsing completed, found 26 syllables
+2025-10-06 11:44:18,627 - INFO - 🔄 Sorting syllables by start time...
+2025-10-06 11:44:18,627 - INFO - 🔄 Creating syllable times list...
+2025-10-06 11:44:18,627 - INFO - 📋 Created syllable map with 26 syllables:
+2025-10-06 11:44:18,627 - INFO -   0: 'mɛ' (CV) - a1:2.164, a3:2.332, m1:1.895, m2:2.147
+2025-10-06 11:44:18,627 - INFO -   1: 'ʁ' (C) - a1:2.332, a3:2.391, m1:2.238, m2:2.314
+2025-10-06 11:44:18,627 - INFO -   2: 'si' (CV) - a1:2.391, a3:2.632, m1:2.198, m2:2.418
+2025-10-06 11:44:18,627 - INFO -   3: 'a' (V) - a1:2.632, a3:2.744, m1:2.363, m2:2.565
+2025-10-06 11:44:18,627 - INFO -   4: 'tu' (CV) - a1:2.744, a3:2.957, m1:2.574, m2:2.767
+2025-10-06 11:44:18,627 - INFO -   5: 's' (C) - a1:2.957, a3:3.183, m1:2.595, m2:2.889
+2025-10-06 11:44:18,627 - INFO -   6: 'pu' (CV) - a1:3.314, a3:3.444, m1:3.210, m2:3.328
+2025-10-06 11:44:18,627 - INFO -   7: 'ʁ' (C) - a1:3.444, a3:3.554, m1:3.268, m2:3.411
+2025-10-06 11:44:18,627 - INFO -   8: 'vɔ' (CV) - a1:3.554, a3:3.724, m1:3.418, m2:3.573
+2025-10-06 11:44:18,627 - INFO -   9: 't' (C) - a1:3.724, a3:3.776, m1:3.641, m2:3.708
+2025-10-06 11:44:18,627 - INFO -   10: 'ʁə' (CV) - a1:3.776, a3:4.094, m1:3.522, m2:3.811
+2025-10-06 11:44:18,627 - INFO -   11: 'a' (V) - a1:4.094, a3:4.134, m1:3.998, m2:4.070
+2025-10-06 11:44:18,627 - INFO -   12: 'tɑ̃' (CV) - a1:4.134, a3:4.324, m1:3.982, m2:4.155
+2025-10-06 11:44:18,627 - INFO -   13: 's' (C) - a1:4.324, a3:4.436, m1:4.145, m2:4.290
+2025-10-06 11:44:18,627 - INFO -   14: 'jɔ̃' (CV) - a1:4.436, a3:4.596, m1:4.308, m2:4.454
+2025-10-06 11:44:18,627 - INFO -   15: 'vo' (CV) - a1:5.312, a3:5.564, m1:5.110, m2:5.340
+2025-10-06 11:44:18,627 - INFO -   16: 'cɛ' (CV) - a1:5.564, a3:5.724, m1:5.436, m2:5.582
+2025-10-06 11:44:18,627 - INFO -   17: 's' (C) - a1:5.724, a3:5.844, m1:5.532, m2:5.688
+2025-10-06 11:44:18,627 - INFO -   18: 't' (C) - a1:5.844, a3:5.906, m1:5.745, m2:5.825
+2025-10-06 11:44:18,628 - INFO -   19: 'jɔ̃' (CV) - a1:5.906, a3:6.211, m1:5.662, m2:5.940
+2025-10-06 11:44:18,628 - INFO -   20: 'sɔ̃' (CV) - a1:6.294, a3:6.664, m1:5.998, m2:6.335
+2025-10-06 11:44:18,628 - INFO -   21: 'le' (CV) - a1:6.664, a3:6.918, m1:6.461, m2:6.692
+2025-10-06 11:44:18,628 - INFO -   22: 'b' (C) - a1:6.963, a3:7.036, m1:6.846, m2:6.941
+2025-10-06 11:44:18,628 - INFO -   23: 'jɛ̃' (CV) - a1:7.036, a3:7.224, m1:6.886, m2:7.057
+2025-10-06 11:44:18,628 - INFO -   24: 'və' (CV) - a1:7.224, a3:7.404, m1:7.080, m2:7.244
+2025-10-06 11:44:18,628 - INFO -   25: 'ny' (CV) - a1:7.404, a3:7.676, m1:7.374, m2:7.744
+2025-10-06 11:44:18,628 - INFO - ✅ Syllable alignment and building completed successfully!
+2025-10-06 11:44:18,628 - INFO - ✅ Step 3 completed: MFA alignment and syllable building finished
+2025-10-06 11:44:18,628 - INFO - 🎬 Step 4: Starting video rendering with hand cues...
+2025-10-06 11:44:18,628 - INFO - 🎬 Starting video rendering with audio...
+2025-10-06 11:44:18,628 - INFO - 📁 Final output path: output/generator/test_generate_cued.mp4
+2025-10-06 11:44:18,628 - INFO - 📁 Temporary video path: output/generator/temp/temp_video.mp4
+2025-10-06 11:44:18,628 - INFO - 🎥 Rendering video with hand cues (without audio)...
+2025-10-06 11:44:18,628 - INFO - 🎬 Starting video rendering with hand cues...
+2025-10-06 11:44:18,816 - INFO - 📹 Video properties: 1920x1080, 30.04 FPS, 287 frames
+2025-10-06 11:44:18,816 - INFO - ⏱️ Total duration: 9.55 seconds
+2025-10-06 11:44:18,879 - INFO - 📊 Rendering progress: 0.0% (0/287 frames)
+2025-10-06 11:44:19,456 - INFO - 📊 Rendering progress: 10.5% (30/287 frames)
+2025-10-06 11:44:20,229 - INFO - 📊 Rendering progress: 20.9% (60/287 frames)
+2025-10-06 11:44:23,724 - INFO - 📊 Rendering progress: 31.4% (90/287 frames)
+2025-10-06 11:44:27,242 - INFO - 📊 Rendering progress: 41.8% (120/287 frames)
+2025-10-06 11:44:31,056 - INFO - 📊 Rendering progress: 52.3% (150/287 frames)
+2025-10-06 11:44:34,816 - INFO - 📊 Rendering progress: 62.7% (180/287 frames)
+2025-10-06 11:44:38,489 - INFO - 📊 Rendering progress: 73.2% (210/287 frames)
+2025-10-06 11:44:41,494 - INFO - 📊 Rendering progress: 83.6% (240/287 frames)
+2025-10-06 11:44:42,065 - INFO - 📊 Rendering progress: 94.1% (270/287 frames)
+2025-10-06 11:44:42,387 - INFO - ✅ Video rendering complete!
+2025-10-06 11:44:42,387 - INFO - 📊 Final stats: 287 frames processed
+2025-10-06 11:44:42,387 - INFO - 👤 Frames with face detected: 287
+2025-10-06 11:44:42,387 - INFO - 🚫 Frames without face: 0
+2025-10-06 11:44:42,387 - INFO - 📈 Face detection rate: 100.0%
+2025-10-06 11:44:42,387 - INFO - 🎉 Excellent face detection rate (100.0%)
+2025-10-06 11:44:42,387 - INFO - 📁 Output saved to: output/generator/temp/temp_video.mp4
+2025-10-06 11:44:42,388 - INFO - ✅ Video rendering completed
+2025-10-06 11:44:42,388 - INFO - 🔊 Adding audio to create final video...
+2025-10-06 11:44:42,388 - INFO - 🔊 Adding audio to video...
+2025-10-06 11:44:42,388 - INFO -    Video path: output/generator/temp/temp_video.mp4
+2025-10-06 11:44:42,388 - INFO -    Audio path: output/generator/temp/audio.wav
+2025-10-06 11:44:42,388 - INFO -    Output path: output/generator/test_generate_cued.mp4
+2025-10-06 11:44:42,388 - INFO - 📹 Loading video and audio clips...
+2025-10-06 11:44:42,853 - INFO -    Video duration: 9.55s
+2025-10-06 11:44:42,853 - INFO -    Audio duration: 9.59s
+2025-10-06 11:44:42,853 - INFO - 🎬 Combining video and audio...
+2025-10-06 11:44:42,853 - INFO - 💾 Writing final video file...
+2025-10-06 11:44:52,361 - INFO - ✅ Final video created successfully: output/generator/test_generate_cued.mp4
+2025-10-06 11:44:52,361 - INFO - ✅ Audio addition completed
+2025-10-06 11:44:52,362 - INFO - ✅ Step 4 completed: Video rendering finished
+2025-10-06 11:44:52,367 - INFO - Cleaned up temporary files
+2025-10-06 11:44:52,367 - INFO - ⏱️ Timing summary (seconds):
+2025-10-06 11:44:52,367 - INFO -    face_test: 1.162
+2025-10-06 11:44:52,367 - INFO -    extract_audio: 1.764
+2025-10-06 11:44:52,367 - INFO -    whisper: 11.296
+2025-10-06 11:44:52,367 - INFO -    mfa_align: 76.955
+2025-10-06 11:44:52,367 - INFO -    textgrid_parse: 0.010
+2025-10-06 11:44:52,367 - INFO -    syllable_build: 0.000
+2025-10-06 11:44:52,368 - INFO -    mfa_total: 76.965
+2025-10-06 11:44:52,368 - INFO -    render_total: 33.734
+2025-10-06 11:44:52,368 - INFO -    total_recorded: 201.885
+2025-10-06 11:44:52,368 - INFO - Cued speech generation complete: output/generator/test_generate_cued.mp4
+MoviePy - Done.
+[{'syllable': 'mɛ', 'a1': 2.164, 'a3': 2.332, 'm1': 1.8952000000000007, 'm2': 2.1472, 'type': 'CV'}, {'syllable': 'ʁ', 'a1': 2.332, 'a3': 2.391, 'm1': 2.2375999999999996, 'm2': 2.3143, 'type': 'C'}, {'syllable': 'si', 'a1': 2.391, 'a3': 2.632, 'm1': 2.1982, 'm2': 2.41751, 'type': 'CV'}, {'syllable': 'a', 'a1': 2.632, 'a3': 2.744, 'm1': 2.3632, 'm2': 2.5648, 'type': 'V'}, {'syllable': 'tu', 'a1': 2.744, 'a3': 2.957, 'm1': 2.5736000000000003, 'm2': 2.76743, 'type': 'CV'}, {'syllable': 's', 'a1': 2.957, 'a3': 3.183, 'm1': 2.5953999999999997, 'm2': 2.8891999999999998, 'type': 'C'}, {'syllable': 'pu', 'a1': 3.314, 'a3': 3.444, 'm1': 3.21, 'm2': 3.3283, 'type': 'CV'}, {'syllable': 'ʁ', 'a1': 3.444, 'a3': 3.554, 'm1': 3.2680000000000002, 'm2': 3.411, 'type': 'C'}, {'syllable': 'vɔ', 'a1': 3.554, 'a3': 3.724, 'm1': 3.4179999999999997, 'm2': 3.5726999999999998, 'type': 'CV'}, {'syllable': 't', 'a1': 3.724, 'a3': 3.776, 'm1': 3.640800000000001, 'm2': 3.7084, 'type': 'C'}, {'syllable': 'ʁə', 'a1': 3.776, 'a3': 4.094, 'm1': 3.5215999999999994, 'm2': 3.81098, 'type': 'CV'}, {'syllable': 'a', 'a1': 4.094, 'a3': 4.134, 'm1': 3.998, 'm2': 4.07, 'type': 'V'}, {'syllable': 'tɑ̃', 'a1': 4.134, 'a3': 4.324, 'm1': 3.9820000000000007, 'm2': 4.1549000000000005, 'type': 'CV'}, {'syllable': 's', 'a1': 4.324, 'a3': 4.436, 'm1': 4.1448, 'm2': 4.2904, 'type': 'C'}, {'syllable': 'jɔ̃', 'a1': 4.436, 'a3': 4.596, 'm1': 4.308, 'm2': 4.4536, 'type': 'CV'}, {'syllable': 'vo', 'a1': 5.312, 'a3': 5.564, 'm1': 5.1104, 'm2': 5.339720000000001, 'type': 'CV'}, {'syllable': 'cɛ', 'a1': 5.564, 'a3': 5.724, 'm1': 5.436, 'm2': 5.5816, 'type': 'CV'}, {'syllable': 's', 'a1': 5.724, 'a3': 5.844, 'm1': 5.532, 'm2': 5.688000000000001, 'type': 'C'}, {'syllable': 't', 'a1': 5.844, 'a3': 5.906, 'm1': 5.7448000000000015, 'm2': 5.8254, 'type': 'C'}, {'syllable': 'jɔ̃', 'a1': 5.906, 'a3': 6.211, 'm1': 5.661999999999999, 'm2': 5.93955, 'type': 'CV'}, {'syllable': 'sɔ̃', 'a1': 6.294, 'a3': 6.664, 'm1': 5.997999999999999, 'm2': 6.3347, 'type': 'CV'}, {'syllable': 'le', 'a1': 6.664, 'a3': 6.918, 'm1': 6.460799999999999, 'm2': 6.69194, 'type': 'CV'}, {'syllable': 'b', 'a1': 6.963, 'a3': 7.036, 'm1': 6.8462000000000005, 'm2': 6.9411000000000005, 'type': 'C'}, {'syllable': 'jɛ̃', 'a1': 7.036, 'a3': 7.224, 'm1': 6.885599999999999, 'm2': 7.05668, 'type': 'CV'}, {'syllable': 'və', 'a1': 7.224, 'a3': 7.404, 'm1': 7.08, 'm2': 7.2438, 'type': 'CV'}, {'syllable': 'ny', 'a1': 7.404, 'a3': 7.676, 'm1': 7.374, 'm2': 7.744, 'type': 'CV'}]
+✅ Cued speech generation complete!
+📁 Output saved to: output/generator/test_generate_cued.mp4
+🎯 Text was automatically extracted from video using Whisper
+🎨 Enhanced features used:
+   • Easing: linear
+   • Morphing: disabled
+   • Transparency: disabled
+   • Curving: disabled

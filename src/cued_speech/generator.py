@@ -546,8 +546,10 @@ class CuedSpeechGenerator:
             # Use provided model object if supplied; else default to "medium"
             model_obj = self.config.get("model")
             if model_obj is None:
+                logger.info("Model was not provided, downloading whisper model")
                 model = whisper.load_model("medium", device=device)
             else:
+                logger.info("Using provided whisper model")
                 model = model_obj
             result = model.transcribe(audio_path, language=self.config["language"])
             logger.info("Audio transcription completed")
@@ -660,14 +662,7 @@ class CuedSpeechGenerator:
             f"{self.config['language']}_mfa", temp_dir, "--clean"
         ] + self.config["mfa_args"]
 
-        # Add parallelism if not already specified
-        if "--num_jobs" not in cmd and "-j" not in cmd:
-            try:
-                jobs = 6
-                cmd += ["--num_jobs", str(jobs)]
-            except Exception:
-                pass
-
+        
         logger.info(f"Running MFA command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         logger.info(f"MFA alignment successful: {result.stdout}")

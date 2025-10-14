@@ -11,7 +11,7 @@ result_path = generate_cue(
     config={
         "language": "french",
         "hand_scale_factor": 0.75,
-        "model": None,  # use preloaded whisper model
+        "model": model,  # use preloaded whisper model
     }
 )
 print("Generated:", result_path)

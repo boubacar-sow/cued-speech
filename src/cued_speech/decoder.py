@@ -774,10 +774,124 @@ def decode_video(
             hp_cols = [c for c in df.columns if 'face' in c]
             lp_cols = [c for c in df.columns if 'lip' in c]
 
+<<<<<<< HEAD
+=======
             Xhs = torch.tensor(df[hs_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
             Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
             Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
 
+            # Forward pass over the window
+            with torch.no_grad():
+                window_logits = model(Xhs, Xhp, Xlp)[0]  # (T_window, V)
+            
+            # Extract logits for commit region (relative to window)
+            commit_start_rel = commit_start - window_start
+            commit_end_rel = commit_end - window_start
+            committed_logits = window_logits[commit_start_rel:commit_end_rel + 1]
+            
+            print(f"  Window logits shape: {window_logits.shape}, committed: {committed_logits.shape}")
+            
+            # Append to all_logits
+            all_logits.append(committed_logits)
+            
+            # Decode using full accumulated logits after each chunk
+            if all_logits:
+                full_logits = torch.cat(all_logits, dim=0)  # (total_committed_frames, V)
+                print(f"  Full accumulated logits shape: {full_logits.shape}")
+                
+                # Apply log_softmax
+                log_probs = F.log_softmax(full_logits, dim=1)
+                
+                # Beam decode on full accumulated log_probs
+                beam_results = beam_decoder(log_probs.unsqueeze(0))
+                if beam_results and beam_results[0]:
+                    best = beam_results[0][0]
+                    pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
+                    if len(pred_tokens) > 0: 
+                        if pred_tokens[-1] == '_': 
+                            pred_tokens = pred_tokens[:-1] 
+                else:
+                    # fallback greedy
+                    argmax = log_probs.argmax(dim=1).tolist()
+                    pred_tokens = [index_to_phoneme[i] for i, _ in groupby(argmax) if i != phoneme_to_index['<BLANK>']]
+
+                print(f"  Decoded sentence after chunk {chunk_idx}: {pred_tokens}")
+                
+                # Update recognition results with latest decoding
+                if pred_tokens:
+                    # Remove previous result if exists
+                    if recognition_results:
+                        recognition_results.clear()
+                    recognition_results.append({
+                        'frame': frame_count,
+                        'phonemes': pred_tokens,
+                    })
+            
+            chunk_idx += 1
+    
+    # Process final chunk if we have uncommitted valid frames
+    num_valid = len(valid_features)
+    if num_valid > 0:
+        # Calculate how many frames have been committed so far
+        if chunk_idx == 0:
+            frames_committed = 0
+        elif chunk_idx == 1:
+            frames_committed = COMMIT_SIZE  # 50
+        else:
+            frames_committed = COMMIT_SIZE + LEFT_CONTEXT + (chunk_idx - 2) * COMMIT_SIZE  # 75 + 50*(chunk_idx-2)
+        
+        if frames_committed < num_valid:
+            # We have uncommitted frames - process final chunk
+            print(f"\n[Video ended] Processing final chunk with {num_valid - frames_committed} uncommitted frames")
+            
+            # Determine window for final chunk
+            if chunk_idx == 0:
+                # Very short video - process all we have
+                window_start = 0
+                window_end = num_valid - 1
+                commit_start = 0
+                commit_end = num_valid - 1
+            elif chunk_idx == 1:
+                # Second chunk as final
+                window_start = LEFT_CONTEXT
+                window_end = num_valid - 1
+                commit_start = COMMIT_SIZE
+                commit_end = num_valid - 1
+            else:
+                # Regular final chunk
+                window_start = COMMIT_SIZE * (chunk_idx - 1)
+                window_end = num_valid - 1
+                commit_start = window_start + LEFT_CONTEXT
+                commit_end = num_valid - 1
+            
+            # Need to have enough frames for a meaningful window
+            if window_end - window_start + 1 >= LEFT_CONTEXT:  # At least 25 frames
+                print(f"Final chunk {chunk_idx}: window=[{window_start}, {window_end}], commit=[{commit_start}, {commit_end}]")
+                
+                window_features = valid_features[window_start:window_end + 1]
+                
+                # Pad if needed to reach minimum window size
+                window_size_actual = len(window_features)
+                if window_size_actual < WINDOW_SIZE:
+                    padding_needed = WINDOW_SIZE - window_size_actual
+                    zero_feature = {k: 0.0 for k in window_features[0].keys()}
+                    window_features.extend([zero_feature] * padding_needed)
+                    print(f"  Padded final window with {padding_needed} zero frames")
+                
+                # Convert to DataFrame
+                df = pd.DataFrame(window_features)
+                
+                # Prepare inputs
+                hs_cols = [c for c in df.columns if 'hand' in c and 'face' not in c]
+                hp_cols = [c for c in df.columns if 'face' in c]
+                lp_cols = [c for c in df.columns if 'lip' in c]
+
+>>>>>>> 364dc0a23f88e971573743a5fb4d0fae35864066
+            Xhs = torch.tensor(df[hs_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+            Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+            Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+
+<<<<<<< HEAD
             # Forward pass over the window
             with torch.no_grad():
                 window_logits = model(Xhs, Xhp, Xlp)[0]  # (T_window, V)
@@ -855,6 +969,38 @@ def decode_video(
                 window_end = num_valid - 1
                 commit_start = COMMIT_SIZE
                 commit_end = num_valid - 1
+=======
+                # Forward pass over the window
+            with torch.no_grad():
+                    window_logits = model(Xhs, Xhp, Xlp)[0]  # (T_window, V)
+                
+                # Extract logits for commit region (relative to window)
+                commit_start_rel = commit_start - window_start
+                commit_end_rel = min(commit_end - window_start, window_size_actual - 1)
+                committed_logits = window_logits[commit_start_rel:commit_end_rel + 1]
+                
+                print(f"  Final window logits shape: {window_logits.shape}, committed: {committed_logits.shape}")
+                
+                # Append to all_logits
+                all_logits.append(committed_logits)
+                
+                # Decode using full accumulated logits after final chunk
+                if all_logits:
+                    full_logits = torch.cat(all_logits, dim=0)  # (total_committed_frames, V)
+                    print(f"  Final full accumulated logits shape: {full_logits.shape}")
+                    
+                    # Apply log_softmax
+                    log_probs = F.log_softmax(full_logits, dim=1)
+                    
+                    # Beam decode on full accumulated log_probs
+                    beam_results = beam_decoder(log_probs.unsqueeze(0))
+                    if beam_results and beam_results[0]:
+                        best = beam_results[0][0]
+                pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
+                if len(pred_tokens) > 0: 
+                    if pred_tokens[-1] == '_': 
+                        pred_tokens = pred_tokens[:-1] 
+>>>>>>> 364dc0a23f88e971573743a5fb4d0fae35864066
             else:
                 # Regular final chunk
                 window_start = COMMIT_SIZE * (chunk_idx - 1)
@@ -884,6 +1030,7 @@ def decode_video(
                 hp_cols = [c for c in df.columns if 'face' in c]
                 lp_cols = [c for c in df.columns if 'lip' in c]
 
+<<<<<<< HEAD
                 Xhs = torch.tensor(df[hs_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
                 Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
                 Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
@@ -934,6 +1081,19 @@ def decode_video(
                             'frame': frame_count,
                             'phonemes': pred_tokens,
                         })
+=======
+                    print(f"  Final decoded sentence: {pred_tokens}")
+
+                    # Update recognition results with final decoding
+            if pred_tokens:
+                        # Remove previous result if exists
+                        if recognition_results:
+                            recognition_results.clear()
+                recognition_results.append({
+                            'frame': frame_count,
+                    'phonemes': pred_tokens,
+                })
+>>>>>>> 364dc0a23f88e971573743a5fb4d0fae35864066
     
     print(f"\nTotal valid frames: {len(valid_features)} (out of {frame_count} total frames)")
     print(f"Total chunks processed: {len(all_logits)}")

@@ -10,6 +10,7 @@ import os
 import subprocess
 import tempfile
 import ssl
+import time
 import urllib.request
 import warnings
 from pathlib import Path
@@ -171,7 +172,15 @@ class CuedSpeechGenerator:
     
     def __init__(self, config: Optional[Dict] = None):
         """Initialize the cued speech generator."""
-        self.config = config or self._get_default_config()
+        # Always start from defaults, then selectively update with user-provided config
+        defaults = self._get_default_config()
+        self.config = dict(defaults)
+        if config:
+            for key, value in config.items():
+                if key in defaults:
+                    self.config[key] = value
+                else:
+                    logger.warning(f"Unknown config key '{key}' ignored. Valid keys: {list(defaults.keys())}")
         self.syllable_map = []
         self.current_video_frame = None
         self.current_hand_pos = None
@@ -179,6 +188,7 @@ class CuedSpeechGenerator:
         self.active_transition = None
         self.last_active_syllable = None
         self.syllable_times = []
+        self._timings: Dict[str, float] = {}
         
     def _get_default_config(self) -> Dict:
         """Get default configuration for generation."""
@@ -193,10 +203,13 @@ class CuedSpeechGenerator:
             "video_codec": "libx265",
             "audio_codec": "aac",
             # New parameters for enhanced gesture generation
-            "easing_function": "ease_in_out_cubic",  # Options: linear, ease_in_out_cubic, ease_out_elastic, ease_in_out_back
-            "enable_morphing": True,  # Enable hand shape morphing
-            "enable_transparency": True,  # Enable transparency effects during transitions
+            "easing_function": "linear",  # Options: linear, ease_in_out_cubic, ease_out_elastic, ease_in_out_back
+            "enable_morphing": False,  # Enable hand shape morphing
+            "enable_transparency": False,  # Enable transparency effects during transitions
             "enable_curving": True,  # Enable curved trajectories for specific position pairs
+            # Control whether to skip Whisper when text is provided
+            "skip_whisper": False,
+            "model": None,
         }
     
     def _validate_paths(self):
@@ -427,57 +440,58 @@ class CuedSpeechGenerator:
         video_path: str,
         output_path: str,
         audio_path: Optional[str] = None,
-        **kwargs
     ) -> str:
         """Generate cued speech video from text input using Whisper + MFA workflow."""
         try:
-            # Update config with provided paths while preserving existing config
-            if not hasattr(self, 'config') or self.config is None:
-                self.config = self._get_default_config()
-            
-            # Ensure mfa_args is preserved
-            if "mfa_args" not in self.config:
-                self.config["mfa_args"] = ["--beam", "200", "--retry_beam", "400", "--fine_tune"]
-            
-            # Update config with any new parameters from kwargs
-            for key, value in kwargs.items():
-                if key in ["easing_function", "enable_morphing", "enable_transparency", "enable_curving"]:
-                    self.config[key] = value
+            # Initialize config from defaults, then merge existing config
+            defaults = self._get_default_config()
+            base_config = self.config if hasattr(self, 'config') and self.config is not None else {}
+            self.config = {**defaults, **base_config}
             
             self.config["video_path"] = video_path
             self.config["output_dir"] = os.path.dirname(output_path)
             self._validate_paths()
             
             # Test MediaPipe face detection first
+            t0 = time.perf_counter()
             self._test_mediapipe_face_detection(video_path)
+            self._timings["face_test"] = time.perf_counter() - t0
             
             # Step 1: Extract or use provided audio
             if audio_path is None:
+                t0 = time.perf_counter()
                 audio_path = self._extract_audio()
+                self._timings["extract_audio"] = time.perf_counter() - t0
             
             # Step 2: Get text - either from parameter or from Whisper transcription
             if text is None and not self.config.get("skip_whisper", False):
                 logger.info("No text provided, extracting from video using Whisper...")
+                t0 = time.perf_counter()
                 transcription = self._transcribe_audio(audio_path)
+                self._timings["whisper"] = time.perf_counter() - t0
                 logger.info(f"Whisper transcription: {transcription}")
                 text = transcription
-            elif self.config.get("skip_whisper", False):
+            elif self.config.get("skip_whisper", False) and text is not None:
                 logger.info("Whisper skipped, using provided text for alignment")
                 transcription = text  # Use provided text for alignment
             else:
                 logger.info(f"Using provided text: '{text}'")
-                # Still transcribe for alignment purposes
-                transcription = self._transcribe_audio(audio_path)
-                logger.info(f"Whisper transcription for alignment: {transcription}")
+                # Skip extra Whisper run when text is provided
+                transcription = text
+                self._timings["whisper"] = 0.0
             
             # Step 3: Use MFA to align the transcription with the audio and get phoneme timing
             logger.info("🎯 Step 3: Starting MFA alignment and syllable building...")
+            t0 = time.perf_counter()
             self._align_and_build_syllables(audio_path, transcription)
+            self._timings["mfa_total"] = time.perf_counter() - t0
             logger.info("✅ Step 3 completed: MFA alignment and syllable building finished")
             
             # Step 4: Render video with hand cues directly to final output
             logger.info("🎬 Step 4: Starting video rendering with hand cues...")
+            t0 = time.perf_counter()
             final_output = self._render_video_with_audio(audio_path)
+            self._timings["render_total"] = time.perf_counter() - t0
             logger.info("✅ Step 4 completed: Video rendering finished")
             
             # Clean up temporary directory and all intermediate files
@@ -487,6 +501,25 @@ class CuedSpeechGenerator:
                 shutil.rmtree(temp_dir)
                 logger.info("Cleaned up temporary files")
             
+            # Log timing summary
+            total_time = sum(self._timings.values()) if self._timings else 0.0
+            logger.info("⏱️ Timing summary (seconds):")
+            for k in [
+                "face_test",
+                "extract_audio",
+                "whisper",
+                "mfa_align",
+                "textgrid_parse",
+                "syllable_build",
+                "mfa_total",
+                "render_video",
+                "add_audio",
+                "render_total",
+            ]:
+                if k in self._timings:
+                    logger.info(f"   {k}: {self._timings[k]:.3f}")
+            logger.info(f"   total_recorded: {total_time:.3f}")
+
             logger.info(f"Cued speech generation complete: {final_output}")
             return final_output
             
@@ -508,10 +541,19 @@ class CuedSpeechGenerator:
     def _transcribe_audio(self, audio_path: str) -> str:
         """Transcribe audio using Whisper."""
         try:
+            t0 = time.perf_counter()
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            model = whisper.load_model("medium", device=device)
+            # Use provided model object if supplied; else default to "medium"
+            model_obj = self.config.get("model")
+            if model_obj is None:
+                logger.info("Model was not provided, downloading whisper model")
+                model = whisper.load_model("medium", device=device)
+            else:
+                logger.info("Using provided whisper model")
+                model = model_obj
             result = model.transcribe(audio_path, language=self.config["language"])
             logger.info("Audio transcription completed")
+            # Note: high-level whisper timing is recorded in caller
             return result["text"]
         except Exception as e:
             if "SSL" in str(e) or "certificate" in str(e).lower():
@@ -525,7 +567,11 @@ class CuedSpeechGenerator:
         try:
             # Try with a smaller model that might already be cached
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            model = whisper.load_model("tiny", device=device)
+            model_obj = self.config.get("model")
+            if model_obj is None:
+                model = whisper.load_model("tiny", device=device)
+            else:
+                model = model_obj
             result = model.transcribe(audio_path, language=self.config["language"])
             logger.info("Audio transcription completed with fallback model")
             return result["text"]
@@ -540,21 +586,27 @@ class CuedSpeechGenerator:
         
         # Run MFA alignment
         logger.info("📝 Running MFA alignment...")
+        t_align = time.perf_counter()
         textgrid_path = self._run_mfa_alignment(audio_path, text)
+        self._timings["mfa_align"] = time.perf_counter() - t_align
         logger.info(f"✅ MFA alignment completed, TextGrid saved to: {textgrid_path}")
         
         # Parse TextGrid
         logger.info("📊 Parsing TextGrid to build syllable map...")
+        t_parse = time.perf_counter()
         self.syllable_map = self._parse_textgrid(textgrid_path)
+        self._timings["textgrid_parse"] = time.perf_counter() - t_parse
         logger.info(f"✅ TextGrid parsing completed, found {len(self.syllable_map)} syllables")
         
         # Sort by start time using 'a1' key instead of tuple index
         logger.info("🔄 Sorting syllables by start time...")
+        t_build = time.perf_counter()
         self.syllable_map.sort(key=lambda x: x['a1'])
         
         # Create syllable times list using dictionary keys
         logger.info("🔄 Creating syllable times list...")
         self.syllable_times = [item['a1'] for item in self.syllable_map]
+        self._timings["syllable_build"] = time.perf_counter() - t_build
         
         # Debug logging
         logger.info(f"📋 Created syllable map with {len(self.syllable_map)} syllables:")
@@ -610,6 +662,7 @@ class CuedSpeechGenerator:
             f"{self.config['language']}_mfa", temp_dir, "--clean"
         ] + self.config["mfa_args"]
 
+        
         logger.info(f"Running MFA command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         logger.info(f"MFA alignment successful: {result.stdout}")
@@ -1035,7 +1088,7 @@ class CuedSpeechGenerator:
             rgb_frame = rgb_frame.astype(np.uint8)
             
             # DEBUG: Log frame processing start
-            logger.info(f"🔍 Processing frame at time {current_time:.3f}s - Frame shape: {rgb_frame.shape}")
+            #logger.info(f"🔍 Processing frame at time {current_time:.3f}s - Frame shape: {rgb_frame.shape}")
             
             # Process with MediaPipe FaceMesh first
             results = face_mesh.process(rgb_frame)
@@ -1045,7 +1098,7 @@ class CuedSpeechGenerator:
             if results.multi_face_landmarks:
                 try:
                     face_landmarks = results.multi_face_landmarks[0]
-                    logger.info(f"✅ FaceMesh detection successful at time {current_time:.3f}s - Found {len(results.multi_face_landmarks)} face(s)")
+                    #logger.info(f"✅ FaceMesh detection successful at time {current_time:.3f}s - Found {len(results.multi_face_landmarks)} face(s)")
                 except Exception as e:
                     logger.warning(f"❌ Error accessing FaceMesh landmarks at time {current_time:.3f}s: {e}")
                     face_landmarks = None
@@ -1082,11 +1135,11 @@ class CuedSpeechGenerator:
                     logger.error(f"💥 Error in fallback detection at time {current_time:.3f}s: {e}")
             
             # If still no face detected, skip this frame
-            if face_landmarks is None:
-                logger.warning(f"🚫 No face detected in frame at time {current_time:.3f}s - SKIPPING FRAME")
-                return False
-            else:
-                logger.info(f"🎯 Face landmarks successfully obtained at time {current_time:.3f}s")
+            #if face_landmarks is None:
+            #    logger.warning(f"🚫 No face detected in frame at time {current_time:.3f}s - SKIPPING FRAME")
+            #    return False
+            #else:
+            #    logger.info(f"🎯 Face landmarks successfully obtained at time {current_time:.3f}s")
                 
         except Exception as e:
             logger.error(f"Error processing frame with MediaPipe: {e}")
@@ -1103,7 +1156,7 @@ class CuedSpeechGenerator:
         if self.active_transition:
             current_syllable = self.active_transition['syllable']
             hand_shape, hand_pos = map_syllable_to_cue(current_syllable)
-            logger.info(f"syllable: {current_syllable} mapped to hand_shape: {hand_shape} hand_position: {hand_pos}")
+            #logger.info(f"syllable: {current_syllable} mapped to hand_shape: {hand_shape} hand_position: {hand_pos}")
         else:
             # Log when no syllable is found for current time
             logger.debug(f"No active syllable found at time {current_time:.3f}s")
@@ -1412,7 +1465,6 @@ def generate_cue(
     output_path: str,
     audio_path: Optional[str] = None,
     config: Optional[Dict] = None,
-    **kwargs
 ) -> str:
     """
     Generate cued speech video from text input or extract text from video using Whisper.
@@ -1421,4 +1473,4 @@ def generate_cue(
     For more control, use CuedSpeechGenerator directly.
     """
     generator = CuedSpeechGenerator(config)
-    return generator.generate_cue(text, video_path, output_path, audio_path, **kwargs)
+    return generator.generate_cue(text, video_path, output_path, audio_path)

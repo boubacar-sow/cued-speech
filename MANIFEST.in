@@ -17,6 +17,7 @@ exclude .gitignore
 exclude .gitattributes
 exclude pixi.toml
 exclude pixi.lock
+exclude job_gpu.sh
 exclude merci.mp4
 recursive-exclude . __pycache__
 recursive-exclude . *.py[co]

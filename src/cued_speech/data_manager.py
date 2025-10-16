@@ -34,6 +34,7 @@ EXPECTED_FILES = {
     "yellow_pixels": "yellow_pixels.csv",
     "french_mfa_dictionary": "french_mfa.dict",
     "french_mfa_acoustic": "french_mfa.zip",
+    # TFLite/Tasks models saved into download/ as part of data setup
     "face_tflite": "face_landmarker.task",
     "hand_tflite": "hand_landmarker.task",
     "pose_tflite": "pose_landmarker_full.task"

@@ -48,14 +48,17 @@ def cli():
 @click.option("--kenlm_fr", default="download/kenlm_fr.bin", help="Path to KenLM model file")
 @click.option("--homophones_path", default="download/homophones_dico.jsonl", help="Path to homophones file")
 @click.option("--kenlm_ipa", default="download/kenlm_ipa.binary", help="Path to language model file")
+@click.option("--face_tflite", default="download/face_landmarker.task", help="Path to face landmark TFLite model (.tflite or .task)")
+@click.option("--hand_tflite", default="download/hand_landmarker.task", help="Path to hand landmark TFLite model (.tflite or .task)")
+@click.option("--pose_tflite", default="download/pose_landmarker_full.task", help="Path to pose landmark TFLite model (.tflite or .task) - use FULL model for best quality [optional]")
 @click.option("--auto_download", default=True, type=bool, help="Automatically download missing data files")
 def decode(video_path, right_speaker, model_path, output_path, vocab_path, 
-          lexicon_path, kenlm_fr, homophones_path, kenlm_ipa, auto_download):
+          lexicon_path, kenlm_fr, homophones_path, kenlm_ipa, face_tflite, hand_tflite, pose_tflite, auto_download):
     """
     Decode a cued-speech video and produce a subtitled video (French sentences at bottom).
     """
     try:
-        # Import decoder only when needed
+        # Import decoders only when needed
         from .decoder import decode_video
         import os
         
@@ -105,17 +108,62 @@ def decode(video_path, right_speaker, model_path, output_path, vocab_path,
         # Create output directory if it doesn't exist
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        decode_video(
-            video_path=video_path,
-            right_speaker=right_speaker,
-            model_path=model_path,
-            output_path=output_path,
-            vocab_path=vocab_path,
-            lexicon_path=lexicon_path,
-            kenlm_model_path=kenlm_fr,
-            homophones_path=homophones_path,
-            lm_path=kenlm_ipa
-        )
+        # If both face and hand TFLite model paths are provided, use TFLite-based decoder
+        if face_tflite and hand_tflite:
+            try:
+                from .decoder_tflite import decode_video_tflite
+                import os
+                
+                # Determine which API will be used based on file extensions
+                face_ext = os.path.splitext(face_tflite)[1].lower() if face_tflite else ""
+                hand_ext = os.path.splitext(hand_tflite)[1].lower() if hand_tflite else ""
+                
+                if face_ext == '.task' or hand_ext == '.task':
+                    click.echo("🧠 Using MediaPipe Tasks API for landmark detection (.task files)")
+                else:
+                    click.echo("🧠 Using TFLite Interpreter for landmark detection (.tflite files)")
+                
+                decode_video_tflite(
+                    video_path=video_path,
+                    right_speaker=right_speaker,
+                    model_path=model_path,
+                    output_path=output_path,
+                    vocab_path=vocab_path,
+                    lexicon_path=lexicon_path,
+                    kenlm_model_path=kenlm_fr,
+                    homophones_path=homophones_path,
+                    lm_path=kenlm_ipa,
+                    face_tflite_path=face_tflite,
+                    hand_tflite_path=hand_tflite,
+                    pose_tflite_path=pose_tflite,
+                )
+            except Exception as e:
+                click.echo(f"⚠️ TFLite decoding unavailable: {e}. Falling back to MediaPipe decoder.")
+                decode_video(
+                    video_path=video_path,
+                    right_speaker=right_speaker,
+                    model_path=model_path,
+                    output_path=output_path,
+                    vocab_path=vocab_path,
+                    lexicon_path=lexicon_path,
+                    kenlm_model_path=kenlm_fr,
+                    homophones_path=homophones_path,
+                    lm_path=kenlm_ipa
+                )
+        else:
+            # Fallback to existing MediaPipe Holistic-based decoder
+            click.echo("🧠 Using MediaPipe Holistic-based landmark detection")
+            decode_video(
+                video_path=video_path,
+                right_speaker=right_speaker,
+                model_path=model_path,
+                output_path=output_path,
+                vocab_path=vocab_path,
+                lexicon_path=lexicon_path,
+                kenlm_model_path=kenlm_fr,
+                homophones_path=homophones_path,
+                lm_path=kenlm_ipa
+            )
         click.echo(f"✅ Decoding complete! Output saved to: {output_path}")
     except ImportError as e:
         click.echo(f"❌ Decoder not available: {e}", err=True)
@@ -132,13 +180,14 @@ def decode(video_path, right_speaker, model_path, output_path, vocab_path,
 @click.option("--audio_path", default=None, help="Path to audio file (optional, will extract from video if not provided)")
 @click.option("--language", default="french", help="Language for speech processing")
 @click.option("--skip-whisper", is_flag=True, help="Skip Whisper transcription (requires --text to be provided)")
+@click.option("--whisper_model", default=None, help="(Deprecated) CLI cannot pass model objects; use Python API to pass a loaded model")
 @click.option("--easing", default="linear", 
               type=click.Choice(["linear", "ease_in_out_cubic", "ease_out_elastic", "ease_in_out_back"]),
               help="Easing function for gesture transitions")
 @click.option("--morphing/--no-morphing", default=False, help="Enable/disable hand shape morphing")
 @click.option("--transparency/--no-transparency", default=False, help="Enable/disable transparency effects")
 @click.option("--curving/--no-curving", default=False, help="Enable/disable curved trajectories")
-def generate(video_path, text, output_path, audio_path, language, skip_whisper, 
+def generate(video_path, text, output_path, audio_path, language, skip_whisper, whisper_model,
             easing, morphing, transparency, curving):
     """
     Generate cued speech video from a video file.
@@ -189,6 +238,7 @@ def generate(video_path, text, output_path, audio_path, language, skip_whisper,
             "audio_codec": "aac",
             "min_display_duration": 0.4,
             "skip_whisper": skip_whisper,  # Pass the flag to the generator
+            "whisper_model": whisper_model,
             "easing_function": easing,
             "enable_morphing": morphing,
             "enable_transparency": transparency,

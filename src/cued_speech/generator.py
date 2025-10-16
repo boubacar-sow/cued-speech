@@ -606,8 +606,8 @@ class CuedSpeechGenerator:
         with open(text_path, "w") as f:
             f.write(text)
         # Build MFA command using the found path
-        cmd = [mfa_path, "align", mfa_input_dir, f"{self.config['language']}_mfa_dictionary",
-            f"{self.config['language']}_mfa_acoustic", temp_dir, "--clean"
+        cmd = [mfa_path, "align", mfa_input_dir, f"{self.config['language']}_mfa",
+            f"{self.config['language']}_mfa", temp_dir, "--clean"
         ] + self.config["mfa_args"]
 
         logger.info(f"Running MFA command: {' '.join(cmd)}")

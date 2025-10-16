@@ -32,8 +32,18 @@ EXPECTED_FILES = {
     "test_decode": "test_decode.mp4",
     "test_generate": "test_generate.mp4",
     "yellow_pixels": "yellow_pixels.csv",
-    "french_mfa_dictionary": "french_mfa_dictionary.zip",
-    "french_mfa_acoustic": "french_mfa_acoustic.zip"
+    "french_mfa_dictionary": "french_mfa.dict",
+    "french_mfa_acoustic": "french_mfa.zip",
+    "face_tflite": "face_landmarker.task",
+    "hand_tflite": "hand_landmarker.task",
+    "pose_tflite": "pose_landmarker_full.task"
+}
+
+# TFLite model download URLs (official MediaPipe models)
+TFLITE_MODEL_URLS = {
+    "face_landmarker.task": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
+    "hand_landmarker.task": "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
+    "pose_landmarker_full.task": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"
 }
 
 # Expected directories in the download
@@ -46,6 +56,34 @@ def get_data_dir() -> Path:
     # Always use the current working directory for user convenience
     cwd_data_dir = Path.cwd() / "download"
     return cwd_data_dir
+
+def download_tflite_models(data_dir: Path, show_progress: bool = True) -> None:
+    """Download MediaPipe TFLite models.
+    
+    Args:
+        data_dir: Directory to save models to
+        show_progress: Whether to show download progress
+    """
+    print("\n📥 Downloading MediaPipe TFLite models (float16, latest)...")
+    
+    for filename, url in TFLITE_MODEL_URLS.items():
+        file_path = data_dir / filename
+        
+        # Skip if already exists
+        if file_path.exists():
+            print(f"  ✓ {filename} already exists")
+            continue
+        
+        print(f"  Downloading {filename}...")
+        try:
+            if show_progress:
+                download_with_progress_requests(url, str(file_path))
+            else:
+                download_with_requests(url, str(file_path))
+            print(f"  ✓ {filename} downloaded successfully")
+        except Exception as e:
+            print(f"  ⚠️  Failed to download {filename}: {e}")
+            print(f"  You can download manually from: {url}")
 
 def download_and_extract_data(force_download: bool = False, 
                             show_progress: bool = True) -> Path:
@@ -62,15 +100,20 @@ def download_and_extract_data(force_download: bool = False,
     
     # Check if data already exists
     if data_dir.exists() and not force_download:
-        # Verify all expected files are present
+        # Verify all expected files are present (excluding TFLite models for now)
         missing_files = []
         for file_type, filename in EXPECTED_FILES.items():
+            # Skip TFLite models in initial check - they'll be downloaded separately
+            if file_type in ['face_tflite', 'hand_tflite', 'pose_tflite']:
+                continue
             file_path = data_dir / filename
             if not file_path.exists():
                 missing_files.append(filename)
         
         if not missing_files:
             print(f"✅ Data files already available at: {data_dir}")
+            # Download TFLite models if missing
+            download_tflite_models(data_dir, show_progress)
             return data_dir
         else:
             print(f"⚠️  Some files missing: {missing_files}")
@@ -123,6 +166,10 @@ def download_and_extract_data(force_download: bool = False,
         shutil.move(str(extracted_dir), str(data_dir))
         
         print(f"✅ Data files extracted to: {data_dir}")
+        
+        # Download TFLite models
+        download_tflite_models(data_dir, show_progress)
+        
         return data_dir
 
 def download_with_requests(url: str, destination: str):

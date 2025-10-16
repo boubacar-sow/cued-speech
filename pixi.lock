@@ -197,7 +197,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-4.0.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/matplotlib-base-3.10.6-py311h0f3be63_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/montreal-forced-aligner-3.3.6-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/montreal-forced-aligner-3.3.4-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-10.8.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/moviepy-1.0.3-pyhd8ed1ab_1.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mpg123-1.32.9-hc50e24c_0.conda
@@ -367,6 +367,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/fe/d0/c51d1e6a80eab11ef96a4cbad17fc0310cf68994fb01a7283276b7e5bbd6/regex-2025.9.18-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/75/2d/582738fc01352a5bc20acac9221e58538365cecb3bb264838f66419df219/sounddevice-0.5.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/8f/a6/02d68cb62cd221589a0ff055073251d883936237c9c990e34a1d7cecd06f/tflite_runtime-2.14.0-cp311-cp311-manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/34/9a/db7a86b829e05a01fd4daa492086f708e0a8b53952e1dbc9d380d2b03677/tiktoken-0.11.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/c3/33/d7a6123231bd4d04c7005dde8507235772f3bc4622a25f3a88c016415d49/torch-2.2.2-cp311-cp311-manylinux1_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/c5/5c/ea155afaabd0b9bd46bc3aef786f387b6285c02468dcef693f68571f5af5/torchaudio-2.2.2-cp311-cp311-manylinux1_x86_64.whl
@@ -3262,9 +3263,9 @@ packages:
   - pylint>=2.6.0 ; extra == 'dev'
   - pyink ; extra == 'dev'
   requires_python: '>=3.9'
-- conda: https://conda.anaconda.org/conda-forge/noarch/montreal-forced-aligner-3.3.6-pyhd8ed1ab_0.conda
-  sha256: f6d5d7f34aaf30b4027ab259b63dcb477d492ffa46d21ccadb646d8614d70b9d
-  md5: 16b47f1d474cd34690c4dcd63ca07c78
+- conda: https://conda.anaconda.org/conda-forge/noarch/montreal-forced-aligner-3.3.4-pyhd8ed1ab_0.conda
+  sha256: 13bc50f8b217fb396c99b7c5f609c95961edeb14183bf6a9245af43255db109d
+  md5: c57a56f221cb14a7e709913ef2e249ec
   depends:
   - baumwelch
   - biopython
@@ -3272,7 +3273,7 @@ packages:
   - ffmpeg
   - hdbscan
   - kaldi
-  - kalpy >=0.8
+  - kalpy
   - kneed
   - librosa
   - ngram
@@ -3286,7 +3287,7 @@ packages:
   - psycopg2
   - pynini
   - pysoundfile
-  - python >=3.10
+  - python >=3.9
   - pyyaml
   - requests
   - rich
@@ -3300,8 +3301,8 @@ packages:
   license_family: MIT
   purls:
   - pkg:pypi/montreal-forced-aligner?source=hash-mapping
-  size: 11567614
-  timestamp: 1758832609586
+  size: 11569528
+  timestamp: 1754021085023
 - conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-10.8.0-pyhd8ed1ab_0.conda
   sha256: fabe81c8f8f3e1d0ef227fc1306526c76189b3f1175f12302c707e0972dd707c
   md5: d7620a15dc400b448e1c88a981b23ddd
@@ -4757,6 +4758,12 @@ packages:
   purls: []
   size: 183204
   timestamp: 1755775909376
+- pypi: https://files.pythonhosted.org/packages/8f/a6/02d68cb62cd221589a0ff055073251d883936237c9c990e34a1d7cecd06f/tflite_runtime-2.14.0-cp311-cp311-manylinux2014_x86_64.whl
+  name: tflite-runtime
+  version: 2.14.0
+  sha256: 195ab752e7e57329a68e54dd3dd5439fad888b9bff1be0f0dc042a3237a90e4d
+  requires_dist:
+  - numpy>=1.23.2
 - conda: https://conda.anaconda.org/conda-forge/noarch/threadpoolctl-3.6.0-pyhecae5ae_0.conda
   sha256: 6016672e0e72c4cf23c0cf7b1986283bd86a9c17e8d319212d78d8e9ae42fdfd
   md5: 9d64911b31d57ca443e9f1e36b04385f

@@ -5,7 +5,9 @@ A comprehensive Python package for processing cued speech videos with both decod
 ## Features
 
 ### Decoder Features
-- **Real-time Video Processing**: Process cued speech videos using MediaPipe for landmark extraction
+- **Real-time Video Processing**: Process cued speech videos using MediaPipe Tasks or MediaPipe Holistic for landmark extraction
+- **TFLite Model Support**: Native support for MediaPipe `.task` files (float16, latest models)
+- **Flexible Model Loading**: Automatically detects and uses either `.task` (MediaPipe Tasks API) or `.tflite` (TFLite Interpreter) files
 - **Neural Network Inference**: Use trained CTC models for phoneme recognition
 - **French Language Correction**: Apply KenLM language models and homophone correction
 - **Subtitle Generation**: Generate subtitled videos with French sentences
@@ -74,6 +76,7 @@ The cued speech generator requires French MFA models (acoustic + dictionary). Th
 
 ```bash
 # Download all required data (includes MFA French models under ./download/)
+pixi shell
 cued-speech download-data
 
 # Save the French acoustic model to MFA's model store (zip file)
@@ -115,19 +118,31 @@ cued-speech cleanup-data --confirm
 ### Required Data Files
 
 The following files are automatically downloaded to a `download/` folder in your current working directory:
-- `cuedspeech-model.pt` - Pre-trained neural network model
+
+**Core Decoder Files:**
+- `cuedspeech-model.pt` - Pre-trained neural network model for phoneme recognition
 - `phonelist.csv` - Phoneme vocabulary
 - `lexicon.txt` - French lexicon
 - `kenlm_fr.bin` - French language model
 - `homophones_dico.jsonl` - Homophone dictionary
 - `kenlm_ipa.binary` - IPA language model
 - `ipa_to_french.csv` - IPA to French mapping
-- `test_decode.mp4` - Sample video for testing
-- `test_generate.mp4` - Sample video for generation
+
+**MediaPipe TFLite Models (float16, latest):**
+- `face_landmarker.task` - Face landmark detection model (478 landmarks, 3.6 MB)
+- `hand_landmarker.task` - Hand landmark detection model (21 landmarks per hand, 7.5 MB)
+- `pose_landmarker_full.task` - Pose landmark detection model, FULL complexity (33 landmarks, 9.0 MB)
+
+**Generator Files:**
 - `rotated_images/` - Directory containing hand shape images for generation
 - `french_mfa.dict` - MFA dictionary
 - `french_mfa.zip` - MFA acoustic model
-**Note:** Data files are stored in `./download/` relative to where you run the commands, making them easy to find and manage.
+
+**Test Files:**
+- `test_decode.mp4` - Sample video for testing decoder
+- `test_generate.mp4` - Sample video for testing generator
+
+**Note:** All data files (including TFLite models) are stored in `./download/` relative to where you run the commands, making them easy to find and manage.
 
 ## Usage
 
@@ -139,19 +154,26 @@ Note: The models are designed for videos at 30 FPS. For best results, use input 
 
 #### Decoding (Cued Speech → Text)
 
-Decode a cued speech video into a subtitled video.
+Decode a cued speech video into a subtitled video. The decoder uses MediaPipe Tasks API with the latest float16 models for optimal accuracy.
 
-Options:
+**Core Options:**
 - `--video_path PATH` (default: `download/test_decode.mp4`): Input cued-speech video
 - `--right_speaker [True|False]` (default: `True`): Whether the speaker uses the right hand
-- `--model_path PATH` (default: `download/cuedspeech-model.pt`): Pretrained model file
 - `--output_path PATH` (default: `output/decoder/decoded_video.mp4`): Output subtitled video
+- `--auto_download [True|False]` (default: `True`): Auto-download missing data files
+
+**Model Paths:**
+- `--model_path PATH` (default: `download/cuedspeech-model.pt`): Pretrained neural network model
 - `--vocab_path PATH` (default: `download/phonelist.csv`): Vocabulary file
 - `--lexicon_path PATH` (default: `download/lexicon.txt`): Lexicon file
 - `--kenlm_fr PATH` (default: `download/kenlm_fr.bin`): KenLM model file
 - `--homophones_path PATH` (default: `download/homophones_dico.jsonl`): Homophones dictionary
 - `--kenlm_ipa PATH` (default: `download/kenlm_ipa.binary`): IPA language model
-- `--auto_download [True|False]` (default: `True`): Auto-download missing data files
+
+**TFLite Model Paths (MediaPipe Tasks):**
+- `--face_tflite PATH` (default: `download/face_landmarker.task`): Face landmark model (`.task` or `.tflite`)
+- `--hand_tflite PATH` (default: `download/hand_landmarker.task`): Hand landmark model (`.task` or `.tflite`)
+- `--pose_tflite PATH` (default: `download/pose_landmarker_full.task`): Pose landmark model (`.task` or `.tflite`)
 
 ```bash
 # Basic usage (uses default paths, automatically downloads data if needed)
@@ -163,7 +185,14 @@ cued-speech decode --video_path /path/to/your/video.mp4
 # Disable automatic data download
 cued-speech decode --auto_download False
 
-# Advanced usage with custom settings
+# Advanced usage with custom TFLite models
+cued-speech decode \
+    --video_path /path/to/your/video.mp4 \
+    --face_tflite /path/to/face_model.task \
+    --hand_tflite /path/to/hand_model.task \
+    --pose_tflite /path/to/pose_model.task
+
+# Full custom configuration
 cued-speech decode \
     --video_path /path/to/your/video.mp4 \
     --output_path output/decoder/my_decoded_video.mp4 \
@@ -173,8 +202,16 @@ cued-speech decode \
     --kenlm_fr /path/to/custom_kenlm.bin \
     --homophones_path /path/to/custom_homophones.jsonl \
     --kenlm_ipa /path/to/custom_lm.binary \
+    --face_tflite /path/to/face_model.task \
+    --hand_tflite /path/to/hand_model.task \
+    --pose_tflite /path/to/pose_model.task \
     --right_speaker True
 ```
+
+**Note on TFLite Models:**
+- The decoder automatically detects file extensions: `.task` files use MediaPipe Tasks API, `.tflite` files use TFLite Interpreter
+- If TFLite models fail to load, the decoder automatically falls back to MediaPipe Holistic
+- Models are downloaded automatically with `cued-speech download-data`
 
 #### Generation (Video → Cued Speech)
 
@@ -286,7 +323,10 @@ result_path = generate_cue(
 ### Core Components
 
 #### Decoder Components
-1. **MediaPipe Integration**: Extracts hand and lip landmarks from video frames
+1. **MediaPipe Integration**: 
+   - **MediaPipe Tasks API** (default): Uses latest float16 models with native `.task` file support
+   - **MediaPipe Holistic** (fallback): Traditional MediaPipe solution
+   - Automatic model detection and loading based on file extension
 2. **Feature Extraction**: Processes landmarks into hand shape, position, and lip features
 3. **Neural Network**: Three-stream fusion encoder with CTC output
 4. **Language Model**: KenLM-based beam search for French sentence correction
@@ -338,9 +378,58 @@ The generator follows a multi-stage pipeline:
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 
+## TFLite Models Information
+
+### Model Details
+
+The decoder uses the latest MediaPipe float16 models for optimal accuracy:
+
+| Model | Landmarks | Size | Precision | Complexity |
+|-------|-----------|------|-----------|------------|
+| **Face Landmarker** | 478 points | 3.6 MB | float16 | Standard |
+| **Hand Landmarker** | 21 points/hand | 7.5 MB | float16 | Standard |
+| **Pose Landmarker FULL** | 33 points | 9.0 MB | float16 | **Highest** |
+
+### Model Sources
+
+Models are automatically downloaded from official MediaPipe repositories:
+- Face: [mediapipe-models/face_landmarker](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task)
+- Hand: [mediapipe-models/hand_landmarker](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task)
+- Pose: [mediapipe-models/pose_landmarker_full](https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task)
+
+### Advantages Over MediaPipe Holistic
+
+1. **Higher Quality**: Float16 precision with latest model versions
+2. **More Landmarks**: Face model provides 478 landmarks (vs 468 in older models)
+3. **Better Pose Estimation**: FULL complexity model for more accurate body tracking
+4. **Mobile-Ready**: Same `.task` files work seamlessly in Flutter mobile apps
+5. **Future-Proof**: Direct access to latest MediaPipe models as they're updated
+
+### Manual Model Management
+
+If you need to download models separately:
+
+```bash
+# Download individual models
+curl -L -o download/face_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+
+curl -L -o download/hand_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+
+curl -L -o download/pose_landmarker_full.task \
+  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task
+```
+
+Or use the provided script (legacy, for separate downloads):
+```bash
+bash download_tflite_models.sh
+```
+
 ## Acknowledgments
 
-- MediaPipe for landmark extraction
+- MediaPipe and MediaPipe Tasks API for landmark extraction
+- Google for providing high-quality TFLite models
 - PyTorch for deep learning framework
 - KenLM for language modeling
 - The cued speech research community

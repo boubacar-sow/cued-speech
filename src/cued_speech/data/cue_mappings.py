@@ -24,16 +24,16 @@ VOWEL_POSITIONS: Dict[str, Union[int, str]] = {
     "œ": -1,
     "ə": -1,
     
-    # Position 2: /ɛ̃/, /ø/ - Right cheek
+    # Position 2: /ɛ̃/, /ø/ - Cheek
     "ɛ̃": 50,
     "ø": 50,
     
-    # Position 3: /i/, /ɔ̃/, /ɑ̃/ - Right corner of the mouth
+    # Position 3: /i/, /ɔ̃/, /ɑ̃/ - Corner of the mouth
     "i": 57,
     "ɔ̃": 57,
     "ɑ̃": 57,
     
-    # Position 4: /u/, /ɛ/, /ɔ/ - Chin (below the mouth)
+    # Position 4: /u/, /ɛ/, /ɔ/ - Chin (below the mouth) - centered, no change needed
     "u": 175,
     "ɛ": 175,
     "ɔ": 175,

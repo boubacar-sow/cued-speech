@@ -101,33 +101,7 @@ def _configure_ssl_for_whisper():
 _configure_ssl_for_whisper()
 
 
-def calculate_face_scale(face_landmarks, reference_face_bbox):
-    """
-    Calculate the scale factor based on the face bounding box.
-    Args:
-        face_landmarks: MediaPipe face landmarks.
-    Returns:
-        float: Scale factor for the hand.
-    """
-    # Extract all x and y coordinates of the face landmarks
-    x_coords = [landmark.x for landmark in face_landmarks.landmark]
-    y_coords = [landmark.y for landmark in face_landmarks.landmark]
-
-    # Calculate the width and height of the face bounding box
-    face_width = max(x_coords) - min(x_coords)
-    face_height = max(y_coords) - min(y_coords)
-
-    # Use the average of width and height as the face size
-    face_size = (face_width + face_height) / 2
-
-    # Define a reference face size (empirically determined for a "normal" face size)
-    ref_face_width = reference_face_bbox["x_max"] - reference_face_bbox["x_min"]
-    ref_face_height = reference_face_bbox["y_max"] - reference_face_bbox["y_min"]
-    reference_face_size = (ref_face_width + ref_face_height) / 2
-
-    # Calculate the scale factor
-    scale_factor = face_size / reference_face_size
-    return scale_factor
+# calculate_face_scale function removed - now using face width for dynamic scaling
 
 
 # Easing functions for smooth transitions
@@ -197,8 +171,6 @@ class CuedSpeechGenerator:
             "output_dir": "output/generator",
             "handshapes_dir": "download/handshapes/coordinates",
             "language": "french",
-            "reference_face_size": 0.3,  # Normalized reference face size
-            "hand_scale_factor": 0.75,
             "mfa_args": ["--beam", "200", "--retry_beam", "400", "--fine_tune"],
             "video_codec": "libx265",
             "audio_codec": "aac",
@@ -207,6 +179,7 @@ class CuedSpeechGenerator:
             "enable_morphing": False,  # Enable hand shape morphing
             "enable_transparency": False,  # Enable transparency effects during transitions
             "enable_curving": True,  # Enable curved trajectories for specific position pairs
+            "enable_debug_landmarks": False,  # Enable debug visualization of face landmarks
             # Control whether to skip Whisper when text is provided
             "skip_whisper": False,
             "model": None,
@@ -1177,14 +1150,14 @@ class CuedSpeechGenerator:
             self.last_active_syllable != self.syllable_map[-1]:
                 hand_shape, hand_pos_code = map_syllable_to_cue(self.last_active_syllable['syllable'])
                 hand_image = self._load_hand_image(hand_shape)
-                scale_factor = calculate_face_scale(face_landmarks, {"x_min": 0, "x_max": 1, "y_min": 0, "y_max": 1})
+                # scale_factor no longer needed - using face width for dynamic scaling
                 self.current_video_frame = self._overlay_hand_image(
                     self.current_video_frame,
                     hand_image,
                     self.current_hand_pos[0],
                     self.current_hand_pos[1],
-                    scale_factor,
-                    hand_shape
+                    hand_shape,
+                    face_landmarks
                 )
         
         return True  # Face was successfully detected and processed
@@ -1245,14 +1218,14 @@ class CuedSpeechGenerator:
         hand_image = self._apply_transparency_effect(hand_image, eased_progress, is_transitioning)
         
         # Render to frame
-        scale_factor = calculate_face_scale(face_landmarks, {"x_min": 0, "x_max": 1, "y_min": 0, "y_max": 1})
+        # scale_factor no longer needed - using face width for dynamic scaling
         self.current_video_frame = self._overlay_hand_image(
             self.current_video_frame,
             hand_image,
             intermediate_pos[0],
             intermediate_pos[1],
-            scale_factor,
-            target_shape
+            target_shape,
+            face_landmarks
         )
         
         # Store the syllable that is currently active
@@ -1298,58 +1271,452 @@ class CuedSpeechGenerator:
         return cv2.imread(hand_image_path, cv2.IMREAD_UNCHANGED)
     
     def _overlay_hand_image(self, frame: np.ndarray, hand_image: np.ndarray, 
-                           target_x: int, target_y: int, scale_factor: float, 
-                           hand_shape: int) -> np.ndarray:
+                           target_x: int, target_y: int, hand_shape: int, 
+                           face_landmarks) -> np.ndarray:
         """
         Overlay the hand image on the current frame at the specified position and scale.
         Args:
             frame: Current video frame.
             hand_image: Preprocessed hand image with transparency.
             target_x, target_y: Target position for the reference finger.
-            scale_factor: Scale factor for the hand image.
             hand_shape (int): The hand shape number (1 to 8).
+            face_landmarks: MediaPipe face landmarks for scaling calculations.
         Returns:
             np.ndarray: Updated video frame with the hand image overlaid.
         """
-        h, w = hand_image.shape[:2]
-        scaled_width = int(w * scale_factor * self.config["hand_scale_factor"])
-        scaled_height = int(h * scale_factor * self.config["hand_scale_factor"])
+        # Get original hand image dimensions
+        original_h, original_w = hand_image.shape[:2]
+        
+        # Calculate face width for dynamic scaling
+        # Use landmarks 234 (left cheek) and 454 (right cheek) to get face width
+        left_cheek = face_landmarks.landmark[234]
+        right_cheek = face_landmarks.landmark[454]
+        face_width = abs(right_cheek.x - left_cheek.x) * frame.shape[1]
+        
+        # Detect reference finger in original hand image to get the distance from landmark 0
+        ref_finger_x_orig, ref_finger_y_orig = self._detect_reference_finger(hand_image, hand_shape)
+        
+        # Get hand landmark 0 (wrist) position in original image
+        # We need to detect this using MediaPipe on the original hand image
+        hand_landmark_0_x, hand_landmark_0_y = self._get_hand_landmark_0(hand_image)
+        
+        # Calculate the distance from landmark 0 to reference finger in original image
+        hand_span_orig = ((ref_finger_x_orig - hand_landmark_0_x)**2 + (ref_finger_y_orig - hand_landmark_0_y)**2)**0.5
+        
+        # Calculate scale factor to make hand span equal to face width
+        scale_factor_hand = face_width / hand_span_orig if hand_span_orig > 0 else 1.0
+        
+        # Resize hand image with calculated scale
+        original_h, original_w = hand_image.shape[:2]
+        scaled_width = int(original_w * scale_factor_hand)
+        scaled_height = int(original_h * scale_factor_hand)
         resized_hand = cv2.resize(hand_image, (scaled_width, scaled_height))
 
-        # Try to load from download directory first
-        data_dir = get_data_dir()
-        csv_path = os.path.join(data_dir, "yellow_pixels.csv")
+        logger.info(f"Face width: {face_width:.1f}px, Hand span: {hand_span_orig:.1f}px, Scale factor: {scale_factor_hand:.3f}")
+        logger.info(f"Resized hand to {scaled_width}x{scaled_height}")
         
-        # Fallback to hardcoded path if not found in download directory
-        if not os.path.exists(csv_path):
-            csv_path = "download/yellow_pixels.csv"
-        ref_finger_data = pd.read_csv(csv_path)
-        hand_row = ref_finger_data[ref_finger_data["image_name"] == f"handshape_{hand_shape}.png"]
-        if hand_row.empty:
-            raise ValueError(f"No reference finger data found for hand shape {hand_shape}")
+        # Detect reference finger in the RESIZED image using MediaPipe
+        # This gives us the exact position in the resized image coordinate system
+        ref_finger_x_scaled, ref_finger_y_scaled = self._detect_reference_finger(resized_hand, hand_shape)
+        
+        # Debug logging
+        logger.info(f"Hand shape {hand_shape}: target=({target_x}, {target_y}), ref_finger=({ref_finger_x_scaled}, {ref_finger_y_scaled}), resized_size=({scaled_width}x{scaled_height})")
 
-        ref_finger_x = hand_row["yellow_pixel_x"].values[0]
-        ref_finger_y = hand_row["yellow_pixel_y"].values[0]
-        ref_finger_x_scaled = ref_finger_x * scale_factor * self.config["hand_scale_factor"]
-        ref_finger_y_scaled = ref_finger_y * scale_factor * self.config["hand_scale_factor"]
-
+        # Since both hand and video have the same resolution, positioning is simple:
+        # Place the hand so the reference finger aligns with the target
         x_offset = int(target_x - ref_finger_x_scaled)
         y_offset = int(target_y - ref_finger_y_scaled)
 
-        # Ensure the hand image stays within the frame boundaries
-        x_offset = max(0, min(x_offset, frame.shape[1] - scaled_width))
-        y_offset = max(0, min(y_offset, frame.shape[0] - scaled_height))
+        logger.info(f"Simple positioning: offset=({x_offset}, {y_offset}), target=({target_x}, {target_y}), ref_finger=({ref_finger_x_scaled}, {ref_finger_y_scaled})")
+        
+        # Handle negative offsets by cropping the hand image appropriately
+        if x_offset < 0:
+            # Crop from left side of hand image
+            crop_x = -x_offset
+            resized_hand = resized_hand[:, crop_x:]
+            x_offset = 0
+            ref_finger_x_scaled = ref_finger_x_scaled - crop_x
+            logger.info(f"Cropped left side: crop_x={crop_x}, new ref_finger_x={ref_finger_x_scaled}")
+            
+        if y_offset < 0:
+            # Crop from top side of hand image
+            crop_y = -y_offset
+            resized_hand = resized_hand[crop_y:, :]
+            y_offset = 0
+            ref_finger_y_scaled = ref_finger_y_scaled - crop_y
+            logger.info(f"Cropped top side: crop_y={crop_y}, new ref_finger_y={ref_finger_y_scaled}")
+            
+        # Handle right/bottom overflow by cropping
+        if x_offset + resized_hand.shape[1] > frame.shape[1]:
+            crop_width = frame.shape[1] - x_offset
+            resized_hand = resized_hand[:, :crop_width]
+            logger.info(f"Cropped right side: new width={crop_width}")
+            
+        if y_offset + resized_hand.shape[0] > frame.shape[0]:
+            crop_height = frame.shape[0] - y_offset
+            resized_hand = resized_hand[:crop_height, :]
+            logger.info(f"Cropped bottom side: new height={crop_height}")
+
+        # Get the actual dimensions of the cropped hand image
+        hand_h, hand_w = resized_hand.shape[:2]
+        
+        # Ensure we don't go beyond frame boundaries
+        end_x = min(x_offset + hand_w, frame.shape[1])
+        end_y = min(y_offset + hand_h, frame.shape[0])
+        
+        # Calculate the actual region to overlay
+        actual_w = end_x - x_offset
+        actual_h = end_y - y_offset
+        
+        if actual_w <= 0 or actual_h <= 0:
+            logger.warning(f"Hand image completely outside frame boundaries")
+            return frame
+            
+        # Crop the hand image to fit the actual overlay region
+        hand_cropped = resized_hand[:actual_h, :actual_w]
 
         if resized_hand.shape[2] == 4:  # Check if the image has an alpha channel
-            alpha_hand = resized_hand[:, :, 3] / 255.0
+            alpha_hand = hand_cropped[:, :, 3] / 255.0
             alpha_frame = 1.0 - alpha_hand
             for c in range(3):
-                frame[y_offset:y_offset + scaled_height, x_offset:x_offset + scaled_width, c] = (
-                    alpha_hand * resized_hand[:, :, c] +
-                    alpha_frame * frame[y_offset:y_offset + scaled_height, x_offset:x_offset + scaled_width, c]
+                frame[y_offset:end_y, x_offset:end_x, c] = (
+                    alpha_hand * hand_cropped[:, :, c] +
+                    alpha_frame * frame[y_offset:end_y, x_offset:end_x, c]
                 )
         else:
-            frame[y_offset:y_offset + scaled_height, x_offset:x_offset + scaled_width] = resized_hand
+            frame[y_offset:end_y, x_offset:end_x] = hand_cropped
+        
+        # Add debug visualization for hand reference finger position
+        if self.config.get("enable_debug_landmarks", True):
+            # Draw where we intended to place the reference finger (target position)
+            cv2.circle(frame, (target_x, target_y), 8, (0, 255, 255), -1)  # Cyan dot for target
+            cv2.circle(frame, (target_x, target_y), 12, (0, 0, 0), 2)  # Black border
+            cv2.putText(frame, "TARGET", (target_x + 15, target_y - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            
+            # Draw where the reference finger actually ended up after applying the offset
+            actual_ref_x = int(x_offset + ref_finger_x_scaled)
+            actual_ref_y = int(y_offset + ref_finger_y_scaled)
+            cv2.circle(frame, (actual_ref_x, actual_ref_y), 8, (255, 0, 255), -1)  # Magenta dot for actual
+            cv2.circle(frame, (actual_ref_x, actual_ref_y), 12, (255, 255, 255), 2)  # White border
+            cv2.putText(frame, "REF", (actual_ref_x + 15, actual_ref_y - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+        
+        # Add debug landmarks visualization
+        frame = self._add_debug_landmarks(frame)
+        
+        return frame
+    
+    def _detect_reference_finger(self, hand_image: np.ndarray, hand_shape: int) -> Tuple[int, int]:
+        """
+        Detect the reference finger tip in the hand image using MediaPipe.
+        - Handshapes 1 and 6: Use index finger (landmark 8)
+        - Other handshapes: Use middle finger (landmark 12)
+        
+        Args:
+            hand_image: Hand image (already resized) with RGBA channels
+            hand_shape: Hand shape number (1-8)
+            
+        Returns:
+            Tuple of (x, y) coordinates of the reference finger tip
+        """
+        try:
+            # Initialize MediaPipe Hands
+            mp_hands = mp.solutions.hands
+            hands = mp_hands.Hands(
+                static_image_mode=True,
+                max_num_hands=1,
+                min_detection_confidence=0.3
+            )
+            
+            # Convert to RGB for MediaPipe
+            if hand_image.shape[2] == 4:
+                rgb_image = cv2.cvtColor(hand_image, cv2.COLOR_BGRA2RGB)
+            else:
+                rgb_image = cv2.cvtColor(hand_image, cv2.COLOR_BGR2RGB)
+            
+            # Process image to detect hand
+            results = hands.process(rgb_image)
+            
+            if results.multi_hand_landmarks:
+                hand_landmarks = results.multi_hand_landmarks[0]
+                h, w = hand_image.shape[:2]
+                
+                # Choose reference finger based on hand shape
+                # Handshapes 1 and 6 use index finger (landmark 8)
+                # Other handshapes use middle finger (landmark 12)
+                if hand_shape in [1, 6]:
+                    ref_landmark_idx = 8  # Index finger tip
+                else:
+                    ref_landmark_idx = 12  # Middle finger tip
+                
+                ref_landmark = hand_landmarks.landmark[ref_landmark_idx]
+                ref_x = int(ref_landmark.x * w)
+                ref_y = int(ref_landmark.y * h)
+                
+                logger.info(f"MediaPipe detected reference finger for shape {hand_shape}: landmark {ref_landmark_idx} at ({ref_x}, {ref_y}) in {w}x{h} image")
+                
+                hands.close()
+                return ref_x, ref_y
+            else:
+                logger.warning(f"MediaPipe could not detect hand in hand image for shape {hand_shape}")
+                hands.close()
+                # Try yellow pixel detection as fallback
+                return self._detect_yellow_pixel_fallback(hand_image)
+                
+        except Exception as e:
+            logger.error(f"Error detecting reference finger with MediaPipe: {e}")
+            # Fallback to yellow pixel detection
+            return self._detect_yellow_pixel_fallback(hand_image)
+    
+    def _get_hand_landmark_0(self, hand_image: np.ndarray) -> Tuple[int, int]:
+        """
+        Get the position of hand landmark 0 (wrist) in the hand image using MediaPipe.
+        
+        Args:
+            hand_image: Hand image with RGBA channels
+            
+        Returns:
+            Tuple of (x, y) coordinates of landmark 0 (wrist)
+        """
+        try:
+            # Initialize MediaPipe Hands
+            mp_hands = mp.solutions.hands
+            hands = mp_hands.Hands(
+                static_image_mode=True,
+                max_num_hands=1,
+                min_detection_confidence=0.3
+            )
+            
+            # Convert to RGB for MediaPipe
+            if hand_image.shape[2] == 4:
+                rgb_image = cv2.cvtColor(hand_image, cv2.COLOR_BGRA2RGB)
+            else:
+                rgb_image = cv2.cvtColor(hand_image, cv2.COLOR_BGR2RGB)
+            
+            # Process image to detect hand
+            results = hands.process(rgb_image)
+            
+            if results.multi_hand_landmarks:
+                hand_landmarks = results.multi_hand_landmarks[0]
+                h, w = hand_image.shape[:2]
+                
+                # Get landmark 0 (wrist)
+                wrist_landmark = hand_landmarks.landmark[0]
+                wrist_x = int(wrist_landmark.x * w)
+                wrist_y = int(wrist_landmark.y * h)
+                
+                logger.info(f"MediaPipe detected wrist (landmark 0) at ({wrist_x}, {wrist_y}) in {w}x{h} image")
+                
+                hands.close()
+                return wrist_x, wrist_y
+            else:
+                logger.warning(f"MediaPipe could not detect hand landmarks in hand image")
+                hands.close()
+                # Fallback: use center of image as wrist position
+                h, w = hand_image.shape[:2]
+                return w // 2, h // 2
+                
+        except Exception as e:
+            logger.error(f"Error detecting wrist with MediaPipe: {e}")
+            # Fallback: use center of image as wrist position
+            h, w = hand_image.shape[:2]
+            return w // 2, h // 2
+    
+    def _detect_yellow_pixel_fallback(self, hand_image: np.ndarray) -> Tuple[int, int]:
+        """
+        Fallback method to detect yellow pixel if MediaPipe fails.
+        
+        Args:
+            hand_image: Hand image (already resized) with RGBA channels
+            
+        Returns:
+            Tuple of (x, y) coordinates of the yellow pixel or center
+        """
+        try:
+            # Convert to RGB if needed
+            if hand_image.shape[2] == 4:
+                rgb_image = cv2.cvtColor(hand_image, cv2.COLOR_BGRA2BGR)
+            else:
+                rgb_image = hand_image.copy()
+            
+            # Convert to HSV for better yellow detection
+            hsv = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2HSV)
+            
+            # Define yellow color range in HSV - broader range for better detection
+            lower_yellow = np.array([15, 150, 150])
+            upper_yellow = np.array([40, 255, 255])
+            
+            # Create mask for yellow pixels
+            yellow_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+            
+            # Find yellow pixels
+            yellow_pixels = np.where(yellow_mask > 0)
+            
+            if len(yellow_pixels[0]) > 0:
+                # Get the centroid of yellow pixels
+                y_coords = yellow_pixels[0]
+                x_coords = yellow_pixels[1]
+                
+                ref_y = int(np.mean(y_coords))
+                ref_x = int(np.mean(x_coords))
+                
+                logger.info(f"Yellow pixel detected at ({ref_x}, {ref_y})")
+                return ref_x, ref_y
+            else:
+                # Ultimate fallback: use center of image
+                logger.warning("Yellow pixel not found, using center as fallback")
+                h, w = hand_image.shape[:2]
+                return w // 2, h // 2
+                
+        except Exception as e:
+            logger.error(f"Error in yellow pixel fallback: {e}")
+            # Use center
+            h, w = hand_image.shape[:2]
+            return w // 2, h // 2
+    
+    def _add_debug_landmarks(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Add debug visualization dots for the 3 reference landmarks used in positioning.
+        This helps visualize landmark detection accuracy, especially when the phone is not parallel to the face.
+        """
+        try:
+            # Check if debug landmarks are enabled
+            if not self.config.get("enable_debug_landmarks", True):
+                return frame
+                
+            # Only add debug landmarks if we have face landmarks available
+            if not hasattr(self, 'current_video_frame') or self.current_video_frame is None:
+                return frame
+                
+            # Convert to RGB and process with MediaPipe to get current landmarks
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            rgb_frame = rgb_frame.astype(np.uint8)
+            
+            # Process with MediaPipe FaceMesh
+            results = face_mesh.process(rgb_frame)
+            if not results.multi_face_landmarks:
+                return frame
+                
+            face_landmarks = results.multi_face_landmarks[0]
+            frame_height, frame_width = frame.shape[:2]
+            
+            # Define the key landmarks used in positioning
+            debug_landmarks = [
+                (50, "Nose Tip", (0, 255, 0)),      # Green - Nose tip (landmark 50)
+                (4, "Nose Bridge", (255, 0, 0)),    # Blue - Nose bridge (landmark 4) 
+                (57, "Mouth Corner", (0, 0, 255)),  # Red - Mouth corner (landmark 57)
+                (152, "Chin", (255, 255, 0))        # Yellow - Chin (landmark 152)
+            ]
+            
+            # Draw debug dots for each landmark
+            for landmark_id, name, color in debug_landmarks:
+                if landmark_id < len(face_landmarks.landmark):
+                    landmark = face_landmarks.landmark[landmark_id]
+                    x = int(landmark.x * frame_width)
+                    y = int(landmark.y * frame_height)
+                    
+                    # Draw a large, visible dot
+                    cv2.circle(frame, (x, y), 8, color, -1)  # Filled circle
+                    cv2.circle(frame, (x, y), 12, (255, 255, 255), 2)  # White border
+                    
+                    # Add text label
+                    cv2.putText(frame, f"{landmark_id}", (x + 15, y - 10), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                    cv2.putText(frame, f"{landmark_id}", (x + 15, y - 10), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+            
+            # Calculate and display positioning information
+            nose_landmark_50 = face_landmarks.landmark[50]
+            nose_landmark_4 = face_landmarks.landmark[4]
+            mouth_corner = face_landmarks.landmark[57]
+            chin = face_landmarks.landmark[152]
+            
+            # Calculate nose distance (used for positioning)
+            nose_distance_x = abs(nose_landmark_50.x - nose_landmark_4.x) * frame_width
+            nose_distance_y = abs(nose_landmark_50.y - nose_landmark_4.y) * frame_height
+            
+            # Add a legend in the top-left corner
+            legend_y = 30
+            cv2.putText(frame, "Debug Landmarks:", (10, legend_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(frame, "Debug Landmarks:", (10, legend_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+            
+            legend_items = [
+                ("50: Nose Tip", (0, 255, 0)),
+                ("4: Nose Bridge", (255, 0, 0)), 
+                ("57: Mouth Corner", (0, 0, 255)),
+                ("152: Chin", (255, 255, 0))
+            ]
+            
+            for i, (text, color) in enumerate(legend_items):
+                y_pos = legend_y + 25 + (i * 20)
+                cv2.circle(frame, (15, y_pos - 5), 6, color, -1)
+                cv2.putText(frame, text, (30, y_pos), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                cv2.putText(frame, text, (30, y_pos), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            
+            # Add positioning information
+            info_y = legend_y + 25 + (len(legend_items) * 20) + 20
+            cv2.putText(frame, f"Nose Distance: {nose_distance_x:.1f}x{nose_distance_y:.1f}px", 
+                       (10, info_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            cv2.putText(frame, f"Nose Distance: {nose_distance_x:.1f}x{nose_distance_y:.1f}px", 
+                       (10, info_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            
+            # Show calculated positions for positions 1 and 5
+            pos1_x = int(mouth_corner.x * frame_width - nose_distance_x)
+            pos1_y = int(mouth_corner.y * frame_height)
+            pos5_x = int(chin.x * frame_width)
+            pos5_y = int(chin.y * frame_height + nose_distance_y)
+            
+            cv2.putText(frame, f"Pos1: ({pos1_x},{pos1_y})", 
+                       (10, info_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            cv2.putText(frame, f"Pos1: ({pos1_x},{pos1_y})", 
+                       (10, info_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            
+            cv2.putText(frame, f"Pos5: ({pos5_x},{pos5_y})", 
+                       (10, info_y + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            cv2.putText(frame, f"Pos5: ({pos5_x},{pos5_y})", 
+                       (10, info_y + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            
+            # Draw calculated position markers
+            cv2.circle(frame, (pos1_x, pos1_y), 6, (255, 0, 255), -1)  # Magenta for Pos1
+            cv2.circle(frame, (pos1_x, pos1_y), 10, (255, 255, 255), 2)  # White border
+            cv2.putText(frame, "P1", (pos1_x + 15, pos1_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            
+            cv2.circle(frame, (pos5_x, pos5_y), 6, (0, 255, 255), -1)  # Cyan for Pos5
+            cv2.circle(frame, (pos5_x, pos5_y), 10, (255, 255, 255), 2)  # White border
+            cv2.putText(frame, "P5", (pos5_x + 15, pos5_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            
+            # Draw position 2, 3, 4 markers as well
+            pos2_x = int(face_landmarks.landmark[50].x * frame_width)
+            pos2_y = int(face_landmarks.landmark[50].y * frame_height)
+            cv2.circle(frame, (pos2_x, pos2_y), 6, (255, 128, 0), -1)  # Orange for Pos2
+            cv2.circle(frame, (pos2_x, pos2_y), 10, (255, 255, 255), 2)
+            cv2.putText(frame, "P2", (pos2_x + 15, pos2_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            
+            pos3_x = int(face_landmarks.landmark[57].x * frame_width)
+            pos3_y = int(face_landmarks.landmark[57].y * frame_height)
+            cv2.circle(frame, (pos3_x, pos3_y), 6, (128, 0, 255), -1)  # Purple for Pos3
+            cv2.circle(frame, (pos3_x, pos3_y), 10, (255, 255, 255), 2)
+            cv2.putText(frame, "P3", (pos3_x + 15, pos3_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            
+            pos4_x = int(face_landmarks.landmark[175].x * frame_width)
+            pos4_y = int(face_landmarks.landmark[175].y * frame_height)
+            cv2.circle(frame, (pos4_x, pos4_y), 6, (0, 128, 255), -1)  # Light blue for Pos4
+            cv2.circle(frame, (pos4_x, pos4_y), 10, (255, 255, 255), 2)
+            cv2.putText(frame, "P4", (pos4_x + 15, pos4_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            
+        except Exception as e:
+            logger.warning(f"Debug landmarks visualization failed: {e}")
+            
         return frame
     
     def _get_target_position(self, face_landmarks, hand_pos: Union[int, str]) -> Tuple[int, int]:
@@ -1364,8 +1731,7 @@ class CuedSpeechGenerator:
         frame_height, frame_width = self.current_video_frame.shape[:2]
         
         if hand_pos == -1:
-            # Position 1: Right side of mouth - use relative distance based on nose landmarks
-            # Calculate the distance between nose landmarks 50 and 4 for relative positioning
+            # Position 1: Side of mouth
             nose_landmark_50 = face_landmarks.landmark[50]  # Nose tip
             nose_landmark_4 = face_landmarks.landmark[4]    # Nose bridge
             
@@ -1373,25 +1739,24 @@ class CuedSpeechGenerator:
             nose_distance_x = abs(nose_landmark_50.x - nose_landmark_4.x) * frame_width
             nose_distance_y = abs(nose_landmark_50.y - nose_landmark_4.y) * frame_height
             
-            # Use this distance to position the hand relative to the mouth corner (landmark 57)
+            # Use landmark 57 (mouth corner)
             mouth_corner = face_landmarks.landmark[57]
             target_x = mouth_corner.x * frame_width - nose_distance_x
             target_y = mouth_corner.y * frame_height
             
         elif hand_pos == -2:
-            # Position 5: Throat/below chin - use relative distance based on nose landmarks
-            # Calculate the distance between nose landmarks 50 and 4 for relative positioning
+            # Position 5: Throat/below chin - use relative distance based on face height
+            # Calculate face height for better scaling
             nose_landmark_50 = face_landmarks.landmark[50]  # Nose tip
             nose_landmark_4 = face_landmarks.landmark[4]    # Nose bridge
-            
-            # Calculate the distance between nose landmarks
-            nose_distance_x = abs(nose_landmark_50.x - nose_landmark_4.x) * frame_width
-            nose_distance_y = abs(nose_landmark_50.y - nose_landmark_4.y) * frame_height
-            
-            # Use this distance to position the hand relative to the chin (landmark 152)
             chin = face_landmarks.landmark[152]
+            
+            # Calculate face height from nose bridge to chin
+            face_height = abs(chin.y - nose_landmark_4.y) * frame_height
+            
+            # Position below chin at about 0.5x face height
             target_x = chin.x * frame_width
-            target_y = chin.y * frame_height + nose_distance_y
+            target_y = chin.y * frame_height + (face_height * 0.5)
             
         else:
             # Direct landmark positioning for other positions

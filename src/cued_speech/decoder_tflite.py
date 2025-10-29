@@ -961,14 +961,37 @@ def run_model_inference(
         hand_pos_np = Xhp.cpu().numpy().astype(np.float32)
         lips_np = Xlp.cpu().numpy().astype(np.float32)
         
+        # Debug: print model input specs and our tensor shapes
+        try:
+            print("[TFLite Debug] Number of model inputs:", len(input_details))
+            for i, det in enumerate(input_details):
+                try:
+                    print(f"[TFLite Debug] Input[{i}] name={det.get('name')} index={det.get('index')} shape={det.get('shape')} dtype={det.get('dtype')}")
+                except Exception:
+                    print(f"[TFLite Debug] Input[{i}] index={det.get('index')} shape={det.get('shape')}")
+            print(f"[TFLite Debug] Provided tensors shapes: hand_shape={hand_shape_np.shape}, hand_pos={hand_pos_np.shape}, lips={lips_np.shape}")
+        except Exception:
+            pass
+
         # Set input tensors in order (must match export order: hand_shape, hand_pos, lips)
         # The model expects 3 separate inputs, not concatenated
         if len(input_details) != 3:
             raise RuntimeError(f"Expected TFLite model with 3 inputs, got {len(input_details)}")
         
-        interpreter.set_tensor(input_details[0]['index'], hand_shape_np)
-        interpreter.set_tensor(input_details[1]['index'], hand_pos_np)
-        interpreter.set_tensor(input_details[2]['index'], lips_np)
+        # Attempt to set tensors; if order is wrong, print detailed hint
+        try:
+            interpreter.set_tensor(input_details[0]['index'], hand_shape_np)
+            interpreter.set_tensor(input_details[1]['index'], hand_pos_np)
+            interpreter.set_tensor(input_details[2]['index'], lips_np)
+            print("[TFLite Debug] Assigned inputs as: [0]=hand_shape, [1]=hand_pos, [2]=lips")
+        except Exception as e:
+            print("[TFLite Debug] Failed assigning inputs as [0]=hand_shape, [1]=hand_pos, [2]=lips")
+            print("[TFLite Debug] Error:", e)
+            print("[TFLite Debug] Tip: The model export order might be different (e.g., lips first). Consider trying permutations:")
+            print("[TFLite Debug]   - [0]=lips, [1]=hand_shape, [2]=hand_pos")
+            print("[TFLite Debug]   - [0]=lips, [1]=hand_pos, [2]=hand_shape")
+            # Re-raise to be handled by caller so we see the original error upstream
+            raise
         
         # Run inference
         interpreter.invoke()

@@ -1,7 +1,8 @@
-"""Cued Speech Decoder Module.
+"""Cued Speech Decoder Module with TFLite Support.
 
-This module provides functionality for decoding cued speech videos and generating
-subtitled output with French sentences at the bottom.
+This module provides functionality for decoding cued speech videos using separate
+TFLite models for face, hand, and pose detection instead of MediaPipe Holistic.
+This enables easier integration with Flutter mobile applications.
 """
 
 import csv
@@ -18,7 +19,6 @@ from itertools import groupby
 import absl.logging
 import cv2
 import kenlm
-import mediapipe as mp
 import numpy as np
 import pandas as pd
 import torch
@@ -26,16 +26,42 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torchaudio.models.decoder import ctc_decoder
+import argparse
 
 # Turn off Abseil's preinit-warning
 absl.logging._warn_preinit_stderr = False
 absl.logging.set_verbosity(absl.logging.ERROR)
+
+# Try to import TFLite runtime
+try:
+    import tflite_runtime.interpreter as tflite
+    TFLITE_AVAILABLE = True
+except ImportError:
+    print("Warning: TensorFlow not available. TFLite models cannot be loaded.")
+    TFLITE_AVAILABLE = False
+
+# Try to import MediaPipe Tasks API for .task file support
+try:
+    import mediapipe as mp
+    from mediapipe.tasks.python import vision
+    from mediapipe.tasks.python.vision import RunningMode
+    from mediapipe.tasks.python.core.base_options import BaseOptions
+    MEDIAPIPE_TASKS_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: MediaPipe Tasks API not available. .task files cannot be loaded. ({e})")
+    MEDIAPIPE_TASKS_AVAILABLE = False
 
 # Constants
 NUM_WORKERS = 4
 QUEUE_MAXSIZE = 10
 INFERENCE_BUFFER_SIZE = 5
 INFERENCE_INTERVAL = 15
+
+# Overlap-save windowing parameters
+WINDOW_SIZE = 100  # Total frames processed at once
+COMMIT_SIZE = 50   # Frames we keep from each window (after first two chunks)
+LEFT_CONTEXT = 25  # Left context frames
+RIGHT_CONTEXT = 25 # Right context frames
 
 # IPA to LIAPHON mapping for French phoneme correction
 IPA_TO_LIAPHON = {
@@ -181,6 +207,515 @@ class CTCModel(nn.Module):
         encoder_out = self.encoder(hand_shape, hand_pos, lips)
         ctc_logits = self.ctc_fc(encoder_out)
         return ctc_logits
+
+
+class TFLiteModelWrapper:
+    """Wrapper for TFLite model inference."""
+    
+    def __init__(self, model_path: str, model_type: str):
+        """
+        Initialize TFLite model wrapper.
+        
+        Args:
+            model_path: Path to the TFLite model file
+            model_type: Type of model ('face', 'hand', or 'pose')
+        """
+        if not TFLITE_AVAILABLE:
+            raise RuntimeError("TensorFlow is not available. Cannot load TFLite models.")
+        
+        # Validate file before attempting to load
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+        # Guard against MediaPipe Task files which are NOT raw .tflite models
+        _, ext = os.path.splitext(model_path)
+        try:
+            with open(model_path, "rb") as f:
+                header = f.read(16)
+        except Exception as e:
+            raise RuntimeError(f"Failed to read model file: {model_path} ({e})")
+        # TFLite flatbuffer models typically start with 'TFL3'
+        is_tflite_flatbuffer = header.startswith(b"TFL3")
+        looks_like_task = (ext.lower() == ".task") or (b"mediapipe" in header.lower())
+        if looks_like_task and not is_tflite_flatbuffer:
+            raise ValueError(
+                "Model provided appears to be a MediaPipe .task file, which cannot be loaded "
+                "by the TFLite Interpreter. Provide a raw .tflite model instead, or run the "
+                "MediaPipe Tasks APIs for .task files.\n"
+                f"Given path: {model_path}"
+            )
+        
+        self.model_type = model_type
+        self.interpreter = tflite.Interpreter(model_path=model_path)
+        self.interpreter.allocate_tensors()
+        
+        # Get input and output details
+        self.input_details = self.interpreter.get_input_details()
+        self.output_details = self.interpreter.get_output_details()
+        
+        print(f"Loaded {model_type} TFLite model from {model_path}")
+        print(f"  Input shape: {self.input_details[0]['shape']}")
+        print(f"  Output details: {len(self.output_details)} outputs")
+        for i, output in enumerate(self.output_details):
+            print(f"    Output {i}: {output['shape']}")
+    
+    def preprocess_image(self, image: np.ndarray) -> np.ndarray:
+        """
+        Preprocess image for model input.
+        
+        Args:
+            image: Input image in BGR format (from OpenCV)
+            
+        Returns:
+            Preprocessed image ready for model input
+        """
+        # Convert BGR to RGB
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Get input shape from model
+        input_shape = self.input_details[0]['shape']
+        height, width = input_shape[1], input_shape[2]
+        
+        # Resize image to model input size
+        resized = cv2.resize(image_rgb, (width, height))
+        
+        # Normalize to [0, 1] if model expects float32
+        if self.input_details[0]['dtype'] == np.float32:
+            resized = resized.astype(np.float32) / 255.0
+        
+        # Add batch dimension
+        input_data = np.expand_dims(resized, axis=0)
+        
+        return input_data
+    
+    def inference(self, image: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        Run inference on the input image.
+        
+        Args:
+            image: Input image in BGR format (from OpenCV)
+            
+        Returns:
+            Dictionary with model outputs
+        """
+        # Preprocess image
+        input_data = self.preprocess_image(image)
+        
+        # Set input tensor
+        self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+        
+        # Run inference
+        self.interpreter.invoke()
+        
+        # Get outputs
+        outputs = {}
+        for i, output_detail in enumerate(self.output_details):
+            output_data = self.interpreter.get_tensor(output_detail['index'])
+            outputs[f'output_{i}'] = output_data
+        
+        return outputs
+
+
+class MediaPipeTasksWrapper:
+    """Wrapper for MediaPipe Tasks API (.task files)."""
+    
+    def __init__(self, model_path: str, model_type: str):
+        """
+        Initialize MediaPipe Tasks wrapper for .task files.
+        
+        Args:
+            model_path: Path to the .task model file
+            model_type: Type of model ('face', 'hand', or 'pose')
+        """
+        if not MEDIAPIPE_TASKS_AVAILABLE:
+            raise RuntimeError("MediaPipe Tasks API is not available. Cannot load .task files.")
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+        
+        self.model_type = model_type
+        self.model_path = model_path
+        
+        # Initialize the appropriate MediaPipe Tasks model
+        base_options = BaseOptions(model_asset_path=model_path)
+        
+        if model_type == 'face':
+            options = vision.FaceLandmarkerOptions(
+                base_options=base_options,
+                running_mode=RunningMode.IMAGE,
+                num_faces=1,  # Optimize for single face
+                min_face_detection_confidence=0.3,  # Match MediaPipe Holistic
+                min_face_presence_confidence=0.3,
+                min_tracking_confidence=0.3
+            )
+            self.landmarker = vision.FaceLandmarker.create_from_options(options)
+        elif model_type == 'hand':
+            options = vision.HandLandmarkerOptions(
+                base_options=base_options,
+                running_mode=RunningMode.IMAGE,
+                num_hands=2,  # Detect both hands
+                min_hand_detection_confidence=0.3,  # Match MediaPipe Holistic
+                min_hand_presence_confidence=0.3,
+                min_tracking_confidence=0.3
+            )
+            self.landmarker = vision.HandLandmarker.create_from_options(options)
+        elif model_type == 'pose':
+            options = vision.PoseLandmarkerOptions(
+                base_options=base_options,
+                running_mode=RunningMode.IMAGE,
+                min_pose_detection_confidence=0.3,  # Match MediaPipe Holistic
+                min_pose_presence_confidence=0.3,
+                min_tracking_confidence=0.3
+            )
+            self.landmarker = vision.PoseLandmarker.create_from_options(options)
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+        
+        print(f"Loaded {model_type} MediaPipe Tasks model from {model_path}")
+    
+    def inference(self, image: np.ndarray) -> Dict[str, Any]:
+        """
+        Run inference on the input image using MediaPipe Tasks API.
+        
+        Args:
+            image: Input image in BGR format (from OpenCV)
+            
+        Returns:
+            Dictionary with landmarks in MediaPipe format
+        """
+        # Convert BGR to RGB
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Create MediaPipe Image object
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
+        
+        # Run inference
+        if self.model_type == 'face':
+            result = self.landmarker.detect(mp_image)
+            return {'face_landmarks': result.face_landmarks}
+        elif self.model_type == 'hand':
+            result = self.landmarker.detect(mp_image)
+            return {'hand_landmarks': result.hand_landmarks, 'handedness': result.handedness}
+        elif self.model_type == 'pose':
+            result = self.landmarker.detect(mp_image)
+            return {'pose_landmarks': result.pose_landmarks}
+        
+        return {}
+    
+    def close(self):
+        """Release resources."""
+        if hasattr(self, 'landmarker'):
+            self.landmarker.close()
+
+
+class MediaPipeStyleLandmarkExtractor:
+    """
+    Extract landmarks in MediaPipe-compatible format using separate TFLite models.
+    This class mimics the interface of MediaPipe Holistic but uses TFLite models.
+    """
+    
+    def __init__(
+        self,
+        face_model_path: Optional[str] = None,
+        hand_model_path: Optional[str] = None,
+        pose_model_path: Optional[str] = None,
+    ):
+        """
+        Initialize landmark extractor with TFLite or MediaPipe Tasks models.
+        
+        Automatically detects the model type based on file extension:
+        - .task files -> MediaPipe Tasks API
+        - .tflite files -> TFLite Interpreter
+        
+        Args:
+            face_model_path: Path to face mesh model (.tflite or .task)
+            hand_model_path: Path to hand landmark model (.tflite or .task)
+            pose_model_path: Path to pose landmark model (.tflite or .task)
+        """
+        self.face_model = None
+        self.hand_model = None
+        self.pose_model = None
+        self.use_mediapipe_tasks = False
+        
+        if face_model_path and os.path.exists(face_model_path):
+            self.face_model = self._create_model_wrapper(face_model_path, 'face')
+        
+        if hand_model_path and os.path.exists(hand_model_path):
+            self.hand_model = self._create_model_wrapper(hand_model_path, 'hand')
+        
+        if pose_model_path and os.path.exists(pose_model_path):
+            self.pose_model = self._create_model_wrapper(pose_model_path, 'pose')
+    
+    def _create_model_wrapper(self, model_path: str, model_type: str):
+        """
+        Create appropriate model wrapper based on file extension.
+        
+        Args:
+            model_path: Path to model file
+            model_type: Type of model ('face', 'hand', or 'pose')
+            
+        Returns:
+            Model wrapper instance (TFLiteModelWrapper or MediaPipeTasksWrapper)
+        """
+        _, ext = os.path.splitext(model_path)
+        
+        if ext.lower() == '.task':
+            # Use MediaPipe Tasks API
+            if not MEDIAPIPE_TASKS_AVAILABLE:
+                raise RuntimeError(
+                    f"MediaPipe Tasks API is required for .task files but is not available. "
+                    f"Install with: pip install mediapipe"
+                )
+            self.use_mediapipe_tasks = True
+            return MediaPipeTasksWrapper(model_path, model_type)
+        else:
+            # Use TFLite Interpreter (for .tflite or other extensions)
+            if not TFLITE_AVAILABLE:
+                raise RuntimeError(
+                    f"TFLite runtime is required for .tflite files but is not available. "
+                    f"Install with: pip install tflite-runtime"
+                )
+            return TFLiteModelWrapper(model_path, model_type)
+    
+    def process(self, image: np.ndarray) -> 'LandmarkResults':
+        """
+        Process an image and extract landmarks.
+        
+        Args:
+            image: Input image in RGB format
+            
+        Returns:
+            LandmarkResults object containing face, hand, and pose landmarks
+        """
+        results = LandmarkResults()
+        
+        # Face landmarks
+        if self.face_model:
+            face_outputs = self.face_model.inference(image)
+            results.face_landmarks = self._parse_face_landmarks(face_outputs)
+        
+        # Hand landmarks (right hand)
+        if self.hand_model:
+            hand_outputs = self.hand_model.inference(image)
+            results.right_hand_landmarks = self._parse_hand_landmarks(hand_outputs)
+        
+        # Pose landmarks
+        if self.pose_model:
+            pose_outputs = self.pose_model.inference(image)
+            results.pose_landmarks = self._parse_pose_landmarks(pose_outputs)
+        
+        return results
+    
+    def _parse_face_landmarks(self, outputs: Dict[str, Any]) -> Optional['Landmarks']:
+        """
+        Parse face landmarks from model outputs (MediaPipe Tasks or TFLite).
+        
+        The face mesh model typically outputs 468 landmarks with (x, y, z) coordinates.
+        """
+        # Check if this is MediaPipe Tasks output (native landmarks)
+        if 'face_landmarks' in outputs:
+            mp_landmarks_list = outputs['face_landmarks']
+            if mp_landmarks_list and len(mp_landmarks_list) > 0:
+                # Convert MediaPipe landmarks to our Landmarks format
+                return self._convert_mediapipe_landmarks_to_custom(mp_landmarks_list[0])
+            return None
+        
+        # Otherwise, parse TFLite output
+        if 'output_0' not in outputs:
+            return None
+        
+        landmarks_array = outputs['output_0']
+        
+        # Handle different output formats
+        if landmarks_array.ndim == 3:
+            # Shape: (1, num_landmarks, 3)
+            landmarks_array = landmarks_array[0]  # Remove batch dimension
+        elif landmarks_array.ndim == 2:
+            # Shape: (num_landmarks, 3)
+            pass
+        else:
+            print(f"Warning: Unexpected face landmarks shape: {landmarks_array.shape}")
+            return None
+        
+        # Create Landmarks object
+        landmarks = Landmarks()
+        for i in range(landmarks_array.shape[0]):
+            if landmarks_array.shape[1] >= 3:
+                x, y, z = landmarks_array[i, 0], landmarks_array[i, 1], landmarks_array[i, 2]
+            else:
+                x, y = landmarks_array[i, 0], landmarks_array[i, 1]
+                z = 0.0
+            
+            landmark = Landmark(x=float(x), y=float(y), z=float(z))
+            landmarks.landmark.append(landmark)
+        
+        return landmarks
+    
+    def _parse_hand_landmarks(self, outputs: Dict[str, Any]) -> Optional['Landmarks']:
+        """
+        Parse hand landmarks from model outputs (MediaPipe Tasks or TFLite).
+        
+        The hand landmark model outputs 21 landmarks with (x, y, z) coordinates.
+        """
+        # Check if this is MediaPipe Tasks output (native landmarks)
+        if 'hand_landmarks' in outputs:
+            mp_landmarks_list = outputs['hand_landmarks']
+            handedness_list = outputs.get('handedness', [])
+            
+            if mp_landmarks_list and len(mp_landmarks_list) > 0:
+                # Find the right hand (prefer right hand for cued speech)
+                right_hand_idx = None
+                for i, handedness in enumerate(handedness_list):
+                    if handedness and len(handedness) > 0:
+                        # MediaPipe returns 'Right' or 'Left' (from camera perspective)
+                        if handedness[0].category_name == 'Right':
+                            right_hand_idx = i
+                            break
+                
+                # If no right hand found, use the first detected hand
+                if right_hand_idx is None and len(mp_landmarks_list) > 0:
+                    right_hand_idx = 0
+                
+                if right_hand_idx is not None:
+                    return self._convert_mediapipe_landmarks_to_custom(mp_landmarks_list[right_hand_idx])
+            return None
+        
+        # Otherwise, parse TFLite output
+        if 'output_0' not in outputs:
+            return None
+        
+        landmarks_array = outputs['output_0']
+        
+        # Handle different output formats
+        if landmarks_array.ndim == 3:
+            # Shape: (1, num_landmarks, 3)
+            landmarks_array = landmarks_array[0]  # Remove batch dimension
+        elif landmarks_array.ndim == 2:
+            # Shape: (num_landmarks, 3)
+            pass
+        else:
+            print(f"Warning: Unexpected hand landmarks shape: {landmarks_array.shape}")
+            return None
+        
+        # Check if we have enough landmarks
+        if landmarks_array.shape[0] < 21:
+            return None
+        
+        # Create Landmarks object
+        landmarks = Landmarks()
+        for i in range(min(21, landmarks_array.shape[0])):
+            if landmarks_array.shape[1] >= 3:
+                x, y, z = landmarks_array[i, 0], landmarks_array[i, 1], landmarks_array[i, 2]
+            else:
+                x, y = landmarks_array[i, 0], landmarks_array[i, 1]
+                z = 0.0
+            
+            landmark = Landmark(x=float(x), y=float(y), z=float(z))
+            landmarks.landmark.append(landmark)
+        
+        return landmarks
+    
+    def _parse_pose_landmarks(self, outputs: Dict[str, Any]) -> Optional['Landmarks']:
+        """
+        Parse pose landmarks from model outputs (MediaPipe Tasks or TFLite).
+        
+        The pose landmark model outputs 33 landmarks with (x, y, z) coordinates.
+        """
+        # Check if this is MediaPipe Tasks output (native landmarks)
+        if 'pose_landmarks' in outputs:
+            mp_landmarks_list = outputs['pose_landmarks']
+            if mp_landmarks_list and len(mp_landmarks_list) > 0:
+                # Convert MediaPipe landmarks to our Landmarks format
+                return self._convert_mediapipe_landmarks_to_custom(mp_landmarks_list[0])
+            return None
+        
+        # Otherwise, parse TFLite output
+        if 'output_0' not in outputs:
+            return None
+        
+        landmarks_array = outputs['output_0']
+        
+        # Handle different output formats
+        if landmarks_array.ndim == 3:
+            # Shape: (1, num_landmarks, 3)
+            landmarks_array = landmarks_array[0]  # Remove batch dimension
+        elif landmarks_array.ndim == 2:
+            # Shape: (num_landmarks, 3)
+            pass
+        else:
+            print(f"Warning: Unexpected pose landmarks shape: {landmarks_array.shape}")
+            return None
+        
+        # Create Landmarks object
+        landmarks = Landmarks()
+        for i in range(landmarks_array.shape[0]):
+            if landmarks_array.shape[1] >= 3:
+                x, y, z = landmarks_array[i, 0], landmarks_array[i, 1], landmarks_array[i, 2]
+            else:
+                x, y = landmarks_array[i, 0], landmarks_array[i, 1]
+                z = 0.0
+            
+            landmark = Landmark(x=float(x), y=float(y), z=float(z))
+            landmarks.landmark.append(landmark)
+        
+        return landmarks
+    
+    def _convert_mediapipe_landmarks_to_custom(self, mp_landmarks) -> 'Landmarks':
+        """
+        Convert MediaPipe Tasks API landmarks to our custom Landmarks format.
+        
+        Args:
+            mp_landmarks: MediaPipe NormalizedLandmarkList
+            
+        Returns:
+            Landmarks object in our custom format
+        """
+        landmarks = Landmarks()
+        for mp_landmark in mp_landmarks:
+            landmark = Landmark(
+                x=float(mp_landmark.x),
+                y=float(mp_landmark.y),
+                z=float(mp_landmark.z) if hasattr(mp_landmark, 'z') else 0.0
+            )
+            landmarks.landmark.append(landmark)
+        return landmarks
+    
+    def close(self):
+        """Clean up resources."""
+        # Close MediaPipe Tasks landmarkers if using them
+        if self.use_mediapipe_tasks:
+            if self.face_model and hasattr(self.face_model, 'close'):
+                self.face_model.close()
+            if self.hand_model and hasattr(self.hand_model, 'close'):
+                self.hand_model.close()
+            if self.pose_model and hasattr(self.pose_model, 'close'):
+                self.pose_model.close()
+        # TFLite interpreter cleanup is handled automatically
+
+
+class Landmark:
+    """Represents a single landmark point."""
+    
+    def __init__(self, x: float, y: float, z: float):
+        self.x = x
+        self.y = y
+        self.z = z
+
+
+class Landmarks:
+    """Represents a collection of landmarks."""
+    
+    def __init__(self):
+        self.landmark = []
+
+
+class LandmarkResults:
+    """Represents the results of landmark detection."""
+    
+    def __init__(self):
+        self.face_landmarks = None
+        self.right_hand_landmarks = None
+        self.left_hand_landmarks = None
+        self.pose_landmarks = None
 
 
 def polygon_area(xs: List[float], ys: List[float]) -> float:
@@ -581,7 +1116,7 @@ def write_subtitled_video(
         print("Note: ffmpeg not available, audio could not be attached")
 
 
-def decode_video(
+def decode_video_tflite(
     video_path: str,
     right_speaker: str,
     model_path: str,
@@ -591,28 +1126,36 @@ def decode_video(
     kenlm_model_path: str,
     homophones_path: str,
     lm_path: str,
+    face_tflite_path: Optional[str] = None,
+    hand_tflite_path: Optional[str] = None,
+    pose_tflite_path: Optional[str] = None,
 ) -> None:
     """
-    Decode a cued speech video and produce a subtitled video with French sentences at the bottom.
+    Decode a cued speech video using TFLite models for landmark detection.
+    
+    This function uses separate TFLite models for face, hand, and pose detection
+    instead of MediaPipe Holistic, making it easier to replicate in Flutter.
 
     Args:
         video_path: Path to input cued-speech video
         right_speaker: Which side is the speaker's hand overlay ("speaker1" or "speaker2")
-        model_path: Path to the pretrained model file
+        model_path: Path to the pretrained CTC model file
         output_path: Path to save subtitled video
         vocab_path: Path to vocabulary file
         lexicon_path: Path to lexicon file
         kenlm_model_path: Path to KenLM model file
         homophones_path: Path to homophones JSONL file
         lm_path: Path to language model file
+        face_tflite_path: Path to face mesh TFLite model (optional)
+        hand_tflite_path: Path to hand landmark TFLite model (optional)
+        pose_tflite_path: Path to pose landmark TFLite model (optional)
     """
-    # Load model and vocabulary
+    # Load CTC model and vocabulary
     model, phoneme_to_index, index_to_phoneme = load_model(model_path, vocab_path)
     device = next(model.parameters()).device
     
     # Initialize CTC beam decoder
     tokens = list(phoneme_to_index.keys())
-    # Add blank token if not present
     blank_idx = phoneme_to_index["<BLANK>"]
     blank_token = index_to_phoneme[blank_idx]
     if blank_token not in tokens:
@@ -633,17 +1176,19 @@ def decode_video(
         unk_word='<UNK>'
     )
 
-    # Initialize MediaPipe
-    mp_holistic = mp.solutions.holistic
-    holistic = mp_holistic.Holistic(
-        static_image_mode=False,
-        model_complexity=1,
-        smooth_landmarks=True,
-        enable_segmentation=False,
-        smooth_segmentation=True,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
+    # Initialize TFLite landmark extractor
+    print("\n" + "="*70)
+    print("Initializing TFLite landmark detection models")
+    print("="*70)
+    
+    landmark_extractor = MediaPipeStyleLandmarkExtractor(
+        face_model_path=face_tflite_path,
+        hand_model_path=hand_tflite_path,
+        pose_model_path=pose_tflite_path,
     )
+    
+    print("\nTFLite models loaded successfully!")
+    print("="*70 + "\n")
 
     # Open video
     cap = cv2.VideoCapture(video_path)
@@ -653,10 +1198,25 @@ def decode_video(
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     recognition_results = deque()
 
-    # Process video frames
+    # Process video frames with real-time overlap-save windowing
     frame_count = 0
-    feature_history = []
+    valid_features = []
     coordinate_buffer = deque(maxlen=INFERENCE_BUFFER_SIZE)
+    
+    # Required feature columns for validation
+    required_hs_cols = 7
+    required_hp_cols = 18
+    required_lp_cols = 8
+    
+    # Windowing state
+    all_logits = []
+    chunk_idx = 0
+    next_window_needed = WINDOW_SIZE
+    
+    print("Processing video in real-time with overlap-save windowing...")
+    print(f"Video FPS: {fps}")
+    print(f"Window size: {WINDOW_SIZE}, Commit size: {COMMIT_SIZE}")
+    print()
 
     while True:
         ret, frame = cap.read()
@@ -665,8 +1225,8 @@ def decode_video(
 
         frame_count += 1
 
-        # Process frame with MediaPipe
-        results = holistic.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        # Process frame with TFLite models
+        results = landmark_extractor.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
         # Extract landmarks
         landmarks_data = {"frame_number": frame_count}
@@ -685,7 +1245,7 @@ def decode_video(
                 landmarks_data[f"face_y{i}"] = landmark.y
                 landmarks_data[f"face_z{i}"] = landmark.z
                 
-        # Lip landmarks (same as face but with lip_ prefix for ACSR compatibility)
+        # Lip landmarks (same as face but with lip_ prefix for compatibility)
         if results.face_landmarks:
             for i, landmark in enumerate(results.face_landmarks.landmark):
                 landmarks_data[f"lip_x{i}"] = landmark.x
@@ -701,77 +1261,200 @@ def decode_video(
         prev2 = coordinate_buffer[-3] if len(coordinate_buffer) >= 3 else None
         features = extract_features_single_row(row, prev, prev2)
 
-        # Append to feature history
-        feature_history.append(features)
-
-        # Run inference every INFERENCE_INTERVAL frames
-        if frame_count % INFERENCE_INTERVAL == 0 and len(feature_history) > 0:
-            # Take the last M frames (like ACSR)
-            chunk = list(feature_history)
+        # Validate features
+        if features:
+            hs_count = sum(1 for k in features.keys() if 'hand' in k and 'face' not in k)
+            hp_count = sum(1 for k in features.keys() if 'face' in k)
+            lp_count = sum(1 for k in features.keys() if 'lip' in k)
             
-            # Convert to DataFrame like ACSR
-            df = pd.DataFrame(chunk).dropna()
-            if df.empty:
-                continue
+            if hs_count == required_hs_cols and hp_count == required_hp_cols and lp_count == required_lp_cols:
+                valid_features.append(features)
+            else:
+                if frame_count % 30 == 0:
+                    print(f"Frame {frame_count}: Dropped (incomplete features: hs={hs_count}, hp={hp_count}, lp={lp_count})")
+        
+        # Check if we have enough valid frames to process a window
+        num_valid = len(valid_features)
+        
+        if num_valid >= next_window_needed:
+            # Determine window boundaries based on chunk index
+            if chunk_idx == 0:
+                window_start = 0
+                window_end = min(WINDOW_SIZE - 1, num_valid - 1)
+                commit_start = 0
+                commit_end = min(COMMIT_SIZE - 1, num_valid - 1)
+                next_window_needed = LEFT_CONTEXT + WINDOW_SIZE
+            elif chunk_idx == 1:
+                window_start = LEFT_CONTEXT
+                window_end = min(window_start + WINDOW_SIZE - 1, num_valid - 1)
+                commit_start = COMMIT_SIZE
+                commit_end = min(commit_start + LEFT_CONTEXT - 1, num_valid - 1)
+                next_window_needed = COMMIT_SIZE + WINDOW_SIZE
+            else:
+                window_start = COMMIT_SIZE * (chunk_idx - 1)
+                window_end = min(window_start + WINDOW_SIZE - 1, num_valid - 1)
+                commit_start = window_start + LEFT_CONTEXT
+                commit_end = min(commit_start + COMMIT_SIZE - 1, num_valid - 1)
+                next_window_needed = COMMIT_SIZE * chunk_idx + WINDOW_SIZE
+            
+            print(f"\n[Valid frames: {num_valid}] Chunk {chunk_idx}: window=[{window_start}, {window_end}], commit=[{commit_start}, {commit_end}]")
+            
+            # Extract features for this window
+            window_features = valid_features[window_start:window_end + 1]
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(window_features)
 
             # Prepare inputs
             hs_cols = [c for c in df.columns if 'hand' in c and 'face' not in c]
             hp_cols = [c for c in df.columns if 'face' in c]
             lp_cols = [c for c in df.columns if 'lip' in c]
 
-            if len(hs_cols) != 7 or len(hp_cols) != 18 or len(lp_cols) != 8:
-                print(f"Warning: Unexpected feature dims - hs:{len(hs_cols)}, hp:{len(hp_cols)}, lp:{len(lp_cols)}")
-                continue
-
             Xhs = torch.tensor(df[hs_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
             Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
             Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
 
-            # Forward pass over the chunk
+            # Forward pass over the window
             with torch.no_grad():
-                logits = model(Xhs, Xhp, Xlp)[0]  # (T_chunk, V)
-                log_probs = F.log_softmax(logits, dim=1)
+                window_logits = model(Xhs, Xhp, Xlp)[0]
+            
+            # Extract logits for commit region
+            commit_start_rel = commit_start - window_start
+            commit_end_rel = commit_end - window_start
+            committed_logits = window_logits[commit_start_rel:commit_end_rel + 1]
+            
+            print(f"  Window logits shape: {window_logits.shape}, committed: {committed_logits.shape}")
+            
+            # Append to all_logits
+            all_logits.append(committed_logits)
+            
+            # Decode using full accumulated logits
+            if all_logits:
+                full_logits = torch.cat(all_logits, dim=0)
+                print(f"  Full accumulated logits shape: {full_logits.shape}")
+                
+                log_probs = F.log_softmax(full_logits, dim=1)
+                
+                beam_results = beam_decoder(log_probs.unsqueeze(0))
+                if beam_results and beam_results[0]:
+                    best = beam_results[0][0]
+                    pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
+                    if len(pred_tokens) > 0: 
+                        if pred_tokens[-1] == '_': 
+                            pred_tokens = pred_tokens[:-1] 
+                else:
+                    argmax = log_probs.argmax(dim=1).tolist()
+                    pred_tokens = [index_to_phoneme[i] for i, _ in groupby(argmax) if i != phoneme_to_index['<BLANK>']]
 
-            # Greedy baseline: remove blanks and repeats
-            greedy_idxs = log_probs.argmax(axis=-1)
-            greedy = []
-            prev = None
-            for idx in greedy_idxs:
-                ph = index_to_phoneme[idx.item()]
-                if ph == '<BLANK>' or idx == prev:
-                    prev = idx
-                    continue
-                greedy.append(ph)
-                prev = idx
-
-            print("Number of frames: ", Xlp.size(1))
-            print("Greedy decoded:", greedy)
-
-            # Beam decode on these log_probs
-            results = beam_decoder(log_probs.unsqueeze(0))
-            if results and results[0]:
-                best = results[0][0]
-                pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
-                if len(pred_tokens) > 0: 
-                    if pred_tokens[-1] == '_': 
-                        pred_tokens = pred_tokens[:-1] 
+                print(f"  Decoded sentence after chunk {chunk_idx}: {pred_tokens}")
+                    
+                if pred_tokens:
+                    if recognition_results:
+                        recognition_results.clear()
+                    recognition_results.append({
+                        'frame': frame_count,
+                        'phonemes': pred_tokens,
+                    })
+                
+                chunk_idx += 1
+    
+    # Process final chunk
+    num_valid = len(valid_features)
+    if num_valid > 0:
+        if chunk_idx == 0:
+            frames_committed = 0
+        elif chunk_idx == 1:
+            frames_committed = COMMIT_SIZE
+        else:
+            frames_committed = COMMIT_SIZE + LEFT_CONTEXT + (chunk_idx - 2) * COMMIT_SIZE
+        
+        if frames_committed < num_valid:
+            print(f"\n[Video ended] Processing final chunk with {num_valid - frames_committed} uncommitted frames")
+            
+            if chunk_idx == 0:
+                window_start = 0
+                window_end = num_valid - 1
+                commit_start = 0
+                commit_end = num_valid - 1
+            elif chunk_idx == 1:
+                window_start = LEFT_CONTEXT
+                window_end = num_valid - 1
+                commit_start = COMMIT_SIZE
+                commit_end = num_valid - 1
             else:
-                # fallback greedy
-                argmax = log_probs.argmax(dim=1).tolist()
-                pred_tokens = [index_to_phoneme[i] for i, _ in groupby(argmax) if i != phoneme_to_index['<BLANK>']]
+                window_start = COMMIT_SIZE * (chunk_idx - 1)
+                window_end = num_valid - 1
+                commit_start = window_start + LEFT_CONTEXT
+                commit_end = num_valid - 1
+            
+            if window_end - window_start + 1 >= LEFT_CONTEXT:
+                print(f"Final chunk {chunk_idx}: window=[{window_start}, {window_end}], commit=[{commit_start}, {commit_end}]")
+                
+                window_features = valid_features[window_start:window_end + 1]
+                window_size_actual = len(window_features)
+                
+                if window_size_actual < WINDOW_SIZE:
+                    padding_needed = WINDOW_SIZE - window_size_actual
+                    zero_feature = {k: 0.0 for k in window_features[0].keys()}
+                    window_features.extend([zero_feature] * padding_needed)
+                    print(f"  Padded final window with {padding_needed} zero frames")
+                
+                df = pd.DataFrame(window_features)
+                
+                hs_cols = [c for c in df.columns if 'hand' in c and 'face' not in c]
+                hp_cols = [c for c in df.columns if 'face' in c]
+                lp_cols = [c for c in df.columns if 'lip' in c]
 
-            # Output
-            frame_id = len(chunk)
-            print(f"Decoded up to frame {frame_id}: {pred_tokens}")
+                Xhs = torch.tensor(df[hs_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+                Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
+                Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
 
-            if pred_tokens:
-                recognition_results.append({
-                    'frame': frame_id,
-                    'phonemes': pred_tokens,
-                })
+                with torch.no_grad():
+                    window_logits = model(Xhs, Xhp, Xlp)[0]
+                
+                commit_start_rel = commit_start - window_start
+                commit_end_rel = min(commit_end - window_start, window_size_actual - 1)
+                committed_logits = window_logits[commit_start_rel:commit_end_rel + 1]
+                
+                print(f"  Final window logits shape: {window_logits.shape}, committed: {committed_logits.shape}")
+                
+                all_logits.append(committed_logits)
+                
+                if all_logits:
+                    full_logits = torch.cat(all_logits, dim=0)
+                    print(f"  Final full accumulated logits shape: {full_logits.shape}")
+                    
+                    log_probs = F.log_softmax(full_logits, dim=1)
+                    
+                    beam_results = beam_decoder(log_probs.unsqueeze(0))
+                    if beam_results and beam_results[0]:
+                        best = beam_results[0][0]
+                        pred_tokens = beam_decoder.idxs_to_tokens(best.tokens)[1:-1]
+                        if len(pred_tokens) > 0: 
+                            if pred_tokens[-1] == '_': 
+                                pred_tokens = pred_tokens[:-1] 
+                    else:
+                        argmax = log_probs.argmax(dim=1).tolist()
+                        pred_tokens = [index_to_phoneme[i] for i, _ in groupby(argmax) if i != phoneme_to_index['<BLANK>']]
+
+                    print(f"  Final decoded sentence: {pred_tokens}")
+
+                    if pred_tokens:
+                        if recognition_results:
+                            recognition_results.clear()
+                        recognition_results.append({
+                            'frame': frame_count,
+                            'phonemes': pred_tokens,
+                        })
+    
+    print(f"\nTotal valid frames: {len(valid_features)} (out of {frame_count} total frames)")
+    print(f"Total chunks processed: {len(all_logits)}")
+    
+    if not all_logits:
+        print("No valid frames to decode")
 
     cap.release()
-    holistic.close()
+    landmark_extractor.close()
 
     # Apply French sentence correction
     if recognition_results:
@@ -780,7 +1463,6 @@ def decode_video(
             liaphon_sequences, homophones_path, kenlm_model_path
         )
 
-        # Update results with corrected sentences
         for i, result in enumerate(recognition_results):
             if i < len(corrected_sentences):
                 result["french_sentence"] = corrected_sentences[i]
@@ -790,3 +1472,40 @@ def decode_video(
     write_subtitled_video(video_path, recognition_results, output_path, fps)
 
     print(f"Decoding complete. Output saved to: {output_path}")
+
+
+def _build_argparser():
+    parser = argparse.ArgumentParser(description="Decode cued speech using TFLite landmark models")
+    parser.add_argument("--video_path", required=True, help="Path to input cued-speech video")
+    parser.add_argument("--output_path", required=True, help="Path to save subtitled video")
+    parser.add_argument("--right_speaker", default=True, type=bool, help="Left or right speaker")
+    parser.add_argument("--model_path", required=True, help="Path to pretrained CTC model (.pth)")
+    parser.add_argument("--vocab_path", required=True, help="Path to vocabulary CSV")
+    parser.add_argument("--lexicon_path", required=True, help="Path to lexicon file")
+    parser.add_argument("--kenlm_model_path", required=True, help="Path to KenLM model (FR)")
+    parser.add_argument("--homophones_path", required=True, help="Path to homophones JSONL")
+    parser.add_argument("--lm_path", required=True, help="Path to language model (IPA)")
+    parser.add_argument("--face_tflite_path", required=True, help="Path to face landmark TFLite model")
+    parser.add_argument("--hand_tflite_path", required=True, help="Path to hand landmark TFLite model")
+    parser.add_argument("--pose_tflite_path", default=None, help="Path to pose landmark TFLite model (optional)")
+    return parser
+
+
+if __name__ == "__main__":
+    parser = _build_argparser()
+    args = parser.parse_args()
+    decode_video_tflite(
+        video_path=args.video_path,
+        right_speaker=args.right_speaker,
+        model_path=args.model_path,
+        output_path=args.output_path,
+        vocab_path=args.vocab_path,
+        lexicon_path=args.lexicon_path,
+        kenlm_model_path=args.kenlm_model_path,
+        homophones_path=args.homophones_path,
+        lm_path=args.lm_path,
+        face_tflite_path=args.face_tflite_path,
+        hand_tflite_path=args.hand_tflite_path,
+        pose_tflite_path=args.pose_tflite_path,
+    )
+

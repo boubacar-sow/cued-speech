@@ -951,21 +951,24 @@ def run_model_inference(
         Logits tensor (seq_len, vocab_size)
     """
     if isinstance(model, dict) and model.get('type') == 'tflite':
-        # TFLite inference
+        # TFLite inference with three separate inputs
         interpreter = model['interpreter']
         input_details = model['input_details']
         output_details = model['output_details']
         
-        # Concatenate features: [hand_shape, hand_pos, lips]
-        # Shape: (batch_size, seq_len, total_features)
-        features_np = np.concatenate([
-            Xhs.cpu().numpy(),
-            Xhp.cpu().numpy(),
-            Xlp.cpu().numpy()
-        ], axis=-1).astype(np.float32)
+        # Convert to numpy arrays (float32)
+        hand_shape_np = Xhs.cpu().numpy().astype(np.float32)
+        hand_pos_np = Xhp.cpu().numpy().astype(np.float32)
+        lips_np = Xlp.cpu().numpy().astype(np.float32)
         
-        # Set input tensor
-        interpreter.set_tensor(input_details[0]['index'], features_np)
+        # Set input tensors in order (must match export order: hand_shape, hand_pos, lips)
+        # The model expects 3 separate inputs, not concatenated
+        if len(input_details) != 3:
+            raise RuntimeError(f"Expected TFLite model with 3 inputs, got {len(input_details)}")
+        
+        interpreter.set_tensor(input_details[0]['index'], hand_shape_np)
+        interpreter.set_tensor(input_details[1]['index'], hand_pos_np)
+        interpreter.set_tensor(input_details[2]['index'], lips_np)
         
         # Run inference
         interpreter.invoke()

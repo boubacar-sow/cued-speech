@@ -973,25 +973,19 @@ def run_model_inference(
         except Exception:
             pass
 
-        # Set input tensors in order (must match export order: hand_shape, hand_pos, lips)
+        # Set input tensors in order discovered via debug:
+        #   Input[0] => lips (8)
+        #   Input[1] => hand_shape (7)
+        #   Input[2] => hand_pos (18)
         # The model expects 3 separate inputs, not concatenated
         if len(input_details) != 3:
             raise RuntimeError(f"Expected TFLite model with 3 inputs, got {len(input_details)}")
         
-        # Attempt to set tensors; if order is wrong, print detailed hint
-        try:
-            interpreter.set_tensor(input_details[0]['index'], hand_shape_np)
-            interpreter.set_tensor(input_details[1]['index'], hand_pos_np)
-            interpreter.set_tensor(input_details[2]['index'], lips_np)
-            print("[TFLite Debug] Assigned inputs as: [0]=hand_shape, [1]=hand_pos, [2]=lips")
-        except Exception as e:
-            print("[TFLite Debug] Failed assigning inputs as [0]=hand_shape, [1]=hand_pos, [2]=lips")
-            print("[TFLite Debug] Error:", e)
-            print("[TFLite Debug] Tip: The model export order might be different (e.g., lips first). Consider trying permutations:")
-            print("[TFLite Debug]   - [0]=lips, [1]=hand_shape, [2]=hand_pos")
-            print("[TFLite Debug]   - [0]=lips, [1]=hand_pos, [2]=hand_shape")
-            # Re-raise to be handled by caller so we see the original error upstream
-            raise
+        # Assign using the detected order
+        interpreter.set_tensor(input_details[0]['index'], lips_np)
+        interpreter.set_tensor(input_details[1]['index'], hand_shape_np)
+        interpreter.set_tensor(input_details[2]['index'], hand_pos_np)
+        print("[TFLite Debug] Assigned inputs as: [0]=lips, [1]=hand_shape, [2]=hand_pos")
         
         # Run inference
         interpreter.invoke()

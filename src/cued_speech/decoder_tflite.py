@@ -1213,8 +1213,7 @@ def decode_video_tflite(
         device = torch.device("cpu")  # TFLite runs on CPU
         print("Using TFLite model (CPU)")
     else:
-        device = next(model.parameters()).device
-        print(f"Using PyTorch model ({device})")
+        raise ValueError("Invalid model type. Expected TFLite model.")
     
     # Initialize CTC beam decoder
     tokens = list(phoneme_to_index.keys())

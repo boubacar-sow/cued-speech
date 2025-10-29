@@ -880,28 +880,109 @@ def extract_features_single_row(
 
 def load_model(
     model_path: str, vocab_path: str
-) -> Tuple[CTCModel, Dict[str, int], Dict[int, str]]:
-    """Load the trained model and vocabulary."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+) -> Tuple[Any, Dict[str, int], Dict[int, str]]:
+    """Load the trained model (PyTorch or TFLite) and vocabulary."""
     # Load vocabulary
     phoneme_to_index, index_to_phoneme = load_vocabulary(vocab_path)
 
-    # Initialize model with correct dimensions matching ACSR
-    hand_shape_dim = 7  # hand-hand distances + thumb-index angle
-    hand_pos_dim = 18   # hand-face distances + angles
-    lips_dim = 8        # lip metrics + area + curvature + velocities + accelerations
-    output_dim = len(phoneme_to_index)
+    # Check if model is TFLite
+    if model_path.endswith('.tflite'):
+        if not TFLITE_AVAILABLE:
+            raise RuntimeError("TFLite runtime is required but not available. Install with: pip install tflite-runtime")
+        
+        print(f"Loading TFLite CTC model from {model_path}")
+        interpreter = tflite.Interpreter(model_path=model_path)
+        interpreter.allocate_tensors()
+        
+        # Get input and output details
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+        
+        print(f"  TFLite model loaded successfully")
+        print(f"  Input shape: {input_details[0]['shape']}")
+        print(f"  Output shape: {output_details[0]['shape']}")
+        
+        # Return interpreter wrapped with metadata
+        model_wrapper = {
+            'type': 'tflite',
+            'interpreter': interpreter,
+            'input_details': input_details,
+            'output_details': output_details
+        }
+        return model_wrapper, phoneme_to_index, index_to_phoneme
+    else:
+        # Load PyTorch model
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Initialize model with correct dimensions matching ACSR
+        hand_shape_dim = 7  # hand-hand distances + thumb-index angle
+        hand_pos_dim = 18   # hand-face distances + angles
+        lips_dim = 8        # lip metrics + area + curvature + velocities + accelerations
+        output_dim = len(phoneme_to_index)
 
-    model = CTCModel(hand_shape_dim, hand_pos_dim, lips_dim, output_dim)
+        model = CTCModel(hand_shape_dim, hand_pos_dim, lips_dim, output_dim)
 
-    # Load trained weights
-    checkpoint = torch.load(model_path, map_location=device)
-    model.load_state_dict(checkpoint)
-    model.to(device)
-    model.eval()
+        # Load trained weights
+        checkpoint = torch.load(model_path, map_location=device)
+        model.load_state_dict(checkpoint)
+        model.to(device)
+        model.eval()
 
-    return model, phoneme_to_index, index_to_phoneme
+        return model, phoneme_to_index, index_to_phoneme
+
+
+def run_model_inference(
+    model: Any,
+    Xhs: torch.Tensor,
+    Xhp: torch.Tensor,
+    Xlp: torch.Tensor,
+    device: Optional[torch.device] = None
+) -> torch.Tensor:
+    """Run inference with either PyTorch or TFLite model.
+    
+    Args:
+        model: Either a PyTorch CTCModel or TFLite model wrapper dict
+        Xhs: Hand shape features (batch_size, seq_len, hand_shape_dim)
+        Xhp: Hand position features (batch_size, seq_len, hand_pos_dim)
+        Xlp: Lip features (batch_size, seq_len, lips_dim)
+        device: PyTorch device (for PyTorch models)
+        
+    Returns:
+        Logits tensor (seq_len, vocab_size)
+    """
+    if isinstance(model, dict) and model.get('type') == 'tflite':
+        # TFLite inference
+        interpreter = model['interpreter']
+        input_details = model['input_details']
+        output_details = model['output_details']
+        
+        # Concatenate features: [hand_shape, hand_pos, lips]
+        # Shape: (batch_size, seq_len, total_features)
+        features_np = np.concatenate([
+            Xhs.cpu().numpy(),
+            Xhp.cpu().numpy(),
+            Xlp.cpu().numpy()
+        ], axis=-1).astype(np.float32)
+        
+        # Set input tensor
+        interpreter.set_tensor(input_details[0]['index'], features_np)
+        
+        # Run inference
+        interpreter.invoke()
+        
+        # Get output
+        logits_np = interpreter.get_tensor(output_details[0]['index'])
+        
+        # Convert back to torch tensor: (batch_size, seq_len, vocab_size)
+        logits = torch.from_numpy(logits_np)
+        
+        # Return first batch element: (seq_len, vocab_size)
+        return logits[0]
+    else:
+        # PyTorch inference
+        with torch.no_grad():
+            logits = model(Xhs, Xhp, Xlp)[0]  # (seq_len, vocab_size)
+        return logits
 
 
 def beam_search(
@@ -1152,7 +1233,14 @@ def decode_video_tflite(
     """
     # Load CTC model and vocabulary
     model, phoneme_to_index, index_to_phoneme = load_model(model_path, vocab_path)
-    device = next(model.parameters()).device
+    
+    # Determine device
+    if isinstance(model, dict) and model.get('type') == 'tflite':
+        device = torch.device("cpu")  # TFLite runs on CPU
+        print("Using TFLite model (CPU)")
+    else:
+        device = next(model.parameters()).device
+        print(f"Using PyTorch model ({device})")
     
     # Initialize CTC beam decoder
     tokens = list(phoneme_to_index.keys())
@@ -1314,9 +1402,8 @@ def decode_video_tflite(
             Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
             Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
 
-            # Forward pass over the window
-            with torch.no_grad():
-                window_logits = model(Xhs, Xhp, Xlp)[0]
+            # Forward pass over the window (PyTorch or TFLite)
+            window_logits = run_model_inference(model, Xhs, Xhp, Xlp, device)
             
             # Extract logits for commit region
             commit_start_rel = commit_start - window_start
@@ -1409,8 +1496,8 @@ def decode_video_tflite(
                 Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
                 Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
 
-                with torch.no_grad():
-                    window_logits = model(Xhs, Xhp, Xlp)[0]
+                # Forward pass over the window (PyTorch or TFLite)
+                window_logits = run_model_inference(model, Xhs, Xhp, Xlp, device)
                 
                 commit_start_rel = commit_start - window_start
                 commit_end_rel = min(commit_end - window_start, window_size_actual - 1)

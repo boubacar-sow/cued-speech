@@ -41,7 +41,7 @@ def cli():
 @click.option("--video_path", default="download/test_decode.mp4", help="Path to input cued-speech video")
 @click.option("--right_speaker", default=True, type=bool,
               help="Left or right speaker")
-@click.option("--model_path", default="download/cuedspeech-model.pt", help="Path to the pretrained model file")
+@click.option("--model_path", default="download/cuedspeech_model_fixed_temporal.tflite", help="Path to the pretrained model file (.pt for PyTorch or .tflite for TFLite)")
 @click.option("--output_path", default="output/decoder/decoded_video.mp4", help="Path to save subtitled video")
 @click.option("--vocab_path", default="download/phonelist.csv", help="Path to vocabulary file")
 @click.option("--lexicon_path", default="download/lexicon.txt", help="Path to lexicon file")

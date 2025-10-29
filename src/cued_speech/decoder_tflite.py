@@ -1470,8 +1470,8 @@ def decode_video_tflite(
                 Xhp = torch.tensor(df[hp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
                 Xlp = torch.tensor(df[lp_cols].values, dtype=torch.float32).unsqueeze(0).to(device)
 
-                # Forward pass over the window (PyTorch or TFLite)
-                window_logits = run_model_inference(model, Xhs, Xhp, Xlp, device)
+                # Forward pass over the window
+                window_logits = run_model_inference(model, Xhs, Xhp, Xlp)
                 
                 commit_start_rel = commit_start - window_start
                 commit_end_rel = min(commit_end - window_start, window_size_actual - 1)

@@ -81,11 +81,11 @@ cued-speech generate video.mp4 --skip-whisper --text "Votre texte ici"
 - `--auto_download [True|False]` - Auto-download data (default: `True`)
 
 **Model Paths (optional):**
-- `--model_path PATH` - Neural network model
+- `--model_path PATH` - TFLite CTC model (default: `download/cuedspeech_model_fixed_temporal.tflite`)
 - `--vocab_path PATH` - Phoneme vocabulary
-- `--face_tflite PATH` - Face landmark model
-- `--hand_tflite PATH` - Hand landmark model
-- `--pose_tflite PATH` - Pose landmark model
+- `--face_tflite PATH` - Face landmark model (default: `download/face_landmarker.task`)
+- `--hand_tflite PATH` - Hand landmark model (default: `download/hand_landmarker.task`)
+- `--pose_tflite PATH` - Pose landmark model (default: `download/pose_landmarker_full.task`)
 
 ### Generator
 **Options:**
@@ -160,13 +160,13 @@ cued-speech cleanup-data --confirm
 Data is stored in `./download/`:
 
 **Decoder:**
-- `cuedspeech-model.pt` - Neural network model
+- `cuedspeech_model_fixed_temporal.tflite` - TFLite CTC model (100-frame fixed temporal window)
 - `phonelist.csv`, `lexicon.txt` - Vocabularies
 - `kenlm_fr.bin`, `kenlm_ipa.binary` - Language models
 - `homophones_dico.jsonl` - Homophone dictionary
-- `face_landmarker.task` - Face landmarks (478 points, 3.6 MB)
-- `hand_landmarker.task` - Hand landmarks (21 points/hand, 7.5 MB)
-- `pose_landmarker_full.task` - Pose landmarks (33 points, 9.0 MB)
+- `face_landmarker.task` - Face landmarks (478 points, 3.6 MB, float16)
+- `hand_landmarker.task` - Hand landmarks (21 points/hand, 7.5 MB, float16)
+- `pose_landmarker_full.task` - Pose landmarks (33 points, 9.0 MB, float16, FULL complexity)
 
 **Generator:**
 - `rotated_images/` - Hand shape images
@@ -178,10 +178,11 @@ Data is stored in `./download/`:
 ## Architecture
 
 ### Decoder
-- **MediaPipe Tasks API**: Latest float16 models for landmark detection
-- **Neural Network**: Three-stream fusion encoder (hand shape, position, lips)
-- **CTC Decoder**: Phoneme recognition with beam search
+- **MediaPipe Tasks API**: Latest float16 models for landmark detection (.task files)
+- **TFLite CTC Model**: Three-stream fusion encoder (hand shape, position, lips) with 100-frame fixed temporal window
+- **CTC Decoder**: Phoneme recognition with KenLM beam search
 - **Language Model**: KenLM for French sentence correction
+- **Real-time Processing**: Overlap-save windowing for streaming inference
 
 ### Generator
 - **Whisper**: Speech-to-text transcription
@@ -193,8 +194,8 @@ Data is stored in `./download/`:
 
 - Models designed for 30 FPS videos
 - Hand size automatically scales based on detected face width
-- TFLite models use MediaPipe Tasks API (`.task` files) or fallback to TFLite Interpreter (`.tflite`)
-- Automatic fallback to MediaPipe Holistic if TFLite models fail
+- Decoder uses MediaPipe Tasks API (`.task` files) for landmark detection
+- CTC model uses TFLite with 100-frame fixed temporal window for optimal performance
 
 ## License
 

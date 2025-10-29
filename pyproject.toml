@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cued_speech"
-version = "0.4.0"
+version = "0.4.1"
 description = "Cued Speech Processing Tools - Decode and Generate cued speech videos"
 readme = "README.md"
 license = "MIT"

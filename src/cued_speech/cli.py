@@ -108,62 +108,33 @@ def decode(video_path, right_speaker, model_path, output_path, vocab_path,
         # Create output directory if it doesn't exist
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        # If both face and hand TFLite model paths are provided, use TFLite-based decoder
-        if face_tflite and hand_tflite:
-            try:
-                from .decoder_tflite import decode_video_tflite
-                import os
-                
-                # Determine which API will be used based on file extensions
-                face_ext = os.path.splitext(face_tflite)[1].lower() if face_tflite else ""
-                hand_ext = os.path.splitext(hand_tflite)[1].lower() if hand_tflite else ""
-                
-                if face_ext == '.task' or hand_ext == '.task':
-                    click.echo("🧠 Using MediaPipe Tasks API for landmark detection (.task files)")
-                else:
-                    click.echo("🧠 Using TFLite Interpreter for landmark detection (.tflite files)")
-                
-                decode_video_tflite(
-                    video_path=video_path,
-                    right_speaker=right_speaker,
-                    model_path=model_path,
-                    output_path=output_path,
-                    vocab_path=vocab_path,
-                    lexicon_path=lexicon_path,
-                    kenlm_model_path=kenlm_fr,
-                    homophones_path=homophones_path,
-                    lm_path=kenlm_ipa,
-                    face_tflite_path=face_tflite,
-                    hand_tflite_path=hand_tflite,
-                    pose_tflite_path=pose_tflite,
-                )
-            except Exception as e:
-                click.echo(f"⚠️ TFLite decoding unavailable: {e}. Falling back to MediaPipe decoder.")
-                decode_video(
-                    video_path=video_path,
-                    right_speaker=right_speaker,
-                    model_path=model_path,
-                    output_path=output_path,
-                    vocab_path=vocab_path,
-                    lexicon_path=lexicon_path,
-                    kenlm_model_path=kenlm_fr,
-                    homophones_path=homophones_path,
-                    lm_path=kenlm_ipa
-                )
+        # Use TFLite-based decoder
+        from .decoder_tflite import decode_video_tflite
+        import os
+        
+        # Determine which API will be used based on file extensions
+        face_ext = os.path.splitext(face_tflite)[1].lower() if face_tflite else ""
+        hand_ext = os.path.splitext(hand_tflite)[1].lower() if hand_tflite else ""
+        
+        if face_ext == '.task' or hand_ext == '.task':
+            click.echo("🧠 Using MediaPipe Tasks API for landmark detection (.task files)")
         else:
-            # Fallback to existing MediaPipe Holistic-based decoder
-            click.echo("🧠 Using MediaPipe Holistic-based landmark detection")
-            decode_video(
-                video_path=video_path,
-                right_speaker=right_speaker,
-                model_path=model_path,
-                output_path=output_path,
-                vocab_path=vocab_path,
-                lexicon_path=lexicon_path,
-                kenlm_model_path=kenlm_fr,
-                homophones_path=homophones_path,
-                lm_path=kenlm_ipa
-            )
+            click.echo("🧠 Using TFLite Interpreter for landmark detection (.tflite files)")
+        
+        decode_video_tflite(
+            video_path=video_path,
+            right_speaker=right_speaker,
+            model_path=model_path,
+            output_path=output_path,
+            vocab_path=vocab_path,
+            lexicon_path=lexicon_path,
+            kenlm_model_path=kenlm_fr,
+            homophones_path=homophones_path,
+            lm_path=kenlm_ipa,
+            face_tflite_path=face_tflite,
+            hand_tflite_path=hand_tflite,
+            pose_tflite_path=pose_tflite,
+        )
         click.echo(f"✅ Decoding complete! Output saved to: {output_path}")
     except ImportError as e:
         click.echo(f"❌ Decoder not available: {e}", err=True)

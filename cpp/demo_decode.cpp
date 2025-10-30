@@ -24,9 +24,8 @@ namespace {
 
 const char* kFeatureScript = R"PY(
 import argparse
-import csv
 import cv2
-import pandas as pd
+import sys
 from collections import deque
 from cued_speech.decoder_tflite import MediaPipeStyleLandmarkExtractor, extract_features_single_row
 
@@ -37,7 +36,6 @@ def main():
     parser.add_argument('--face', required=True)
     parser.add_argument('--hand', required=True)
     parser.add_argument('--pose', required=True)
-    parser.add_argument('--output', required=True)
     args = parser.parse_args()
 
     extractor = MediaPipeStyleLandmarkExtractor(
@@ -48,72 +46,71 @@ def main():
 
     cap = cv2.VideoCapture(args.video)
     coordinate_buffer = deque(maxlen=3)
-    valid_features = []
-    frame_numbers = []
+    hs_keys = None
+    hp_keys = None
+    lp_keys = None
     frame_idx = 0
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        frame_idx += 1
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = extractor.process(rgb_frame)
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_idx += 1
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = extractor.process(rgb_frame)
 
-        landmarks_data = {}
+            landmarks_data = {}
 
-        if results.right_hand_landmarks:
-            for i, landmark in enumerate(results.right_hand_landmarks.landmark):
-                landmarks_data[f"hand_x{i}"] = float(landmark.x)
-                landmarks_data[f"hand_y{i}"] = float(landmark.y)
-                landmarks_data[f"hand_z{i}"] = float(landmark.z)
+            if results.right_hand_landmarks:
+                for i, landmark in enumerate(results.right_hand_landmarks.landmark):
+                    landmarks_data[f"hand_x{i}"] = float(landmark.x)
+                    landmarks_data[f"hand_y{i}"] = float(landmark.y)
+                    landmarks_data[f"hand_z{i}"] = float(landmark.z)
 
-        if results.face_landmarks:
-            for i, landmark in enumerate(results.face_landmarks.landmark):
-                landmarks_data[f"face_x{i}"] = float(landmark.x)
-                landmarks_data[f"face_y{i}"] = float(landmark.y)
-                landmarks_data[f"face_z{i}"] = float(landmark.z)
-                landmarks_data[f"lip_x{i}"] = float(landmark.x)
-                landmarks_data[f"lip_y{i}"] = float(landmark.y)
-                landmarks_data[f"lip_z{i}"] = float(landmark.z)
+            if results.face_landmarks:
+                for i, landmark in enumerate(results.face_landmarks.landmark):
+                    landmarks_data[f"face_x{i}"] = float(landmark.x)
+                    landmarks_data[f"face_y{i}"] = float(landmark.y)
+                    landmarks_data[f"face_z{i}"] = float(landmark.z)
+                    landmarks_data[f"lip_x{i}"] = float(landmark.x)
+                    landmarks_data[f"lip_y{i}"] = float(landmark.y)
+                    landmarks_data[f"lip_z{i}"] = float(landmark.z)
 
-        row = pd.Series(landmarks_data)
-        coordinate_buffer.append(row)
-        prev = coordinate_buffer[-2] if len(coordinate_buffer) >= 2 else None
-        prev2 = coordinate_buffer[-3] if len(coordinate_buffer) >= 3 else None
-        features = extract_features_single_row(row, prev, prev2)
+            row = dict(landmarks_data)
+            coordinate_buffer.append(row)
+            prev = coordinate_buffer[-2] if len(coordinate_buffer) >= 2 else None
+            prev2 = coordinate_buffer[-3] if len(coordinate_buffer) >= 3 else None
+            features = extract_features_single_row(row, prev, prev2)
 
-        if features:
-            hs_count = sum(1 for k in features.keys() if 'hand' in k and 'face' not in k)
-            hp_count = sum(1 for k in features.keys() if 'face' in k)
-            lp_count = sum(1 for k in features.keys() if 'lip' in k)
-            if hs_count == 7 and hp_count == 18 and lp_count == 8:
-                valid_features.append(features)
-                frame_numbers.append(frame_idx)
+            if features:
+                hs_candidates = [k for k in features.keys() if 'hand' in k and 'face' not in k]
+                hp_candidates = [k for k in features.keys() if 'face' in k]
+                lp_candidates = [k for k in features.keys() if 'lip' in k]
 
-    cap.release()
-    extractor.close()
+                if len(hs_candidates) == 7 and len(hp_candidates) == 18 and len(lp_candidates) == 8:
+                    if hs_keys is None:
+                        hs_keys = hs_candidates
+                        hp_keys = hp_candidates
+                        lp_keys = lp_candidates
 
-    if not valid_features:
-        with open(args.output, 'w', newline='') as sink:
-            writer = csv.writer(sink)
-            writer.writerow(['frame'])
-        return
+                    values = [features[k] for k in hs_keys]
+                    values.extend(features[k] for k in hp_keys)
+                    values.extend(features[k] for k in lp_keys)
 
-    df = pd.DataFrame(valid_features)
-    hs_cols = [c for c in df.columns if 'hand' in c and 'face' not in c]
-    hp_cols = [c for c in df.columns if 'face' in c]
-    lp_cols = [c for c in df.columns if 'lip' in c]
+                    line = "DATA,{},{}".format(
+                        frame_idx,
+                        ",".join(f"{v:.10f}" for v in values),
+                    )
+                    sys.stdout.write(line + "\n")
+                    sys.stdout.flush()
+                    continue
 
-    with open(args.output, 'w', newline='') as sink:
-        writer = csv.writer(sink)
-        writer.writerow(['frame'] + hs_cols + hp_cols + lp_cols)
-        for idx in range(len(df)):
-            row_vals = [frame_numbers[idx]]
-            row_vals += list(df.iloc[idx][hs_cols])
-            row_vals += list(df.iloc[idx][hp_cols])
-            row_vals += list(df.iloc[idx][lp_cols])
-            writer.writerow(row_vals)
+            sys.stdout.write(f"DROP,{frame_idx}\n")
+            sys.stdout.flush()
+    finally:
+        cap.release()
+        extractor.close()
 
 
 if __name__ == '__main__':
@@ -121,92 +118,12 @@ if __name__ == '__main__':
 )PY";
 
 bool ensure_feature_script(const fs::path& script_path) {
-    if (fs::exists(script_path)) {
-        return true;
-    }
-    std::ofstream script(script_path);
+    std::ofstream script(script_path, std::ios::trunc);
     if (!script) {
         std::cerr << "Failed to create helper script at " << script_path << std::endl;
         return false;
     }
     script << kFeatureScript;
-    return true;
-}
-
-bool generate_features(const fs::path& python_exe,
-                       const fs::path& script_path,
-                       const fs::path& video,
-                       const fs::path& face,
-                       const fs::path& hand,
-                       const fs::path& pose,
-                       const fs::path& output_csv) {
-    if (!ensure_feature_script(script_path)) {
-        return false;
-    }
-
-    std::stringstream cmd;
-    cmd << '"' << python_exe.string() << '"'
-        << ' ' << '"' << script_path.string() << '"'
-        << " --video " << '"' << video.string() << '"'
-        << " --face " << '"' << face.string() << '"'
-        << " --hand " << '"' << hand.string() << '"'
-        << " --pose " << '"' << pose.string() << '"'
-        << " --output " << '"' << output_csv.string() << '"';
-
-    std::cout << "Generating frame features via Python...\n";
-    int ret = std::system(cmd.str().c_str());
-    if (ret != 0) {
-        std::cerr << "Python feature extraction failed (exit code " << ret << ")\n";
-        return false;
-    }
-    return true;
-}
-
-bool load_feature_csv(const fs::path& csv_path,
-                      std::vector<int>& frame_numbers,
-                      std::vector<std::array<float, 33>>& feature_rows) {
-    std::ifstream in(csv_path);
-    if (!in) {
-        std::cerr << "Failed to open features CSV: " << csv_path << std::endl;
-        return false;
-    }
-
-    std::string header;
-    if (!std::getline(in, header)) {
-        std::cerr << "Features CSV is empty: " << csv_path << std::endl;
-        return false;
-    }
-
-    const size_t expected_columns = 1 + 33;
-    std::string line;
-    while (std::getline(in, line)) {
-        if (line.empty()) {
-            continue;
-        }
-        std::stringstream ss(line);
-        std::string cell;
-        std::vector<std::string> cells;
-        while (std::getline(ss, cell, ',')) {
-            cells.push_back(cell);
-        }
-        if (cells.size() != expected_columns) {
-            std::cerr << "Unexpected column count in features row: " << cells.size()
-                      << " (expected " << expected_columns << ")\n";
-            return false;
-        }
-        frame_numbers.push_back(std::stoi(cells[0]));
-        std::array<float, 33> feats{};
-        for (size_t i = 0; i < 33; ++i) {
-            feats[i] = std::stof(cells[i + 1]);
-        }
-        feature_rows.push_back(feats);
-    }
-
-    if (feature_rows.empty()) {
-        std::cerr << "No features found in CSV." << std::endl;
-        return false;
-    }
-
     return true;
 }
 
@@ -229,28 +146,20 @@ int main(int argc, char** argv) {
         fs::path face_model_path = download_dir / "face_landmarker.task";
         fs::path hand_model_path = download_dir / "hand_landmarker.task";
         fs::path pose_model_path = download_dir / "pose_landmarker_full.task";
-        fs::path features_csv = download_dir / "test_decode_features.csv";
         fs::path script_path = download_dir / "generate_features.py";
         fs::path python_exe = fs::path("python");
 
-        if (!fs::exists(features_csv)) {
-            if (!generate_features(python_exe, script_path, video_path,
-                                   face_model_path, hand_model_path, pose_model_path,
-                                   features_csv)) {
-                return 1;
-            }
-        } else {
-            std::cout << "Using cached features: " << features_csv << '\n';
-        }
-
-        std::vector<int> frame_numbers;
-        std::vector<std::array<float, 33>> feature_rows;
-        if (!load_feature_csv(features_csv, frame_numbers, feature_rows)) {
+        if (!fs::exists(video_path)) {
+            std::cerr << "Input video not found: " << video_path << std::endl;
             return 1;
         }
 
         if (!fs::exists(model_path)) {
             std::cerr << "Acoustic TFLite model not found at " << model_path << std::endl;
+            return 1;
+        }
+
+        if (!ensure_feature_script(script_path)) {
             return 1;
         }
 
@@ -279,30 +188,125 @@ int main(int argc, char** argv) {
 
         WindowProcessor processor(&decoder, &acoustic_model);
 
+        std::stringstream cmd;
+        cmd << '"' << python_exe.string() << '"'
+            << ' ' << '"' << script_path.string() << '"'
+            << " --video " << '"' << video_path.string() << '"'
+            << " --face " << '"' << face_model_path.string() << '"'
+            << " --hand " << '"' << hand_model_path.string() << '"'
+            << " --pose " << '"' << pose_model_path.string() << '"';
+
+        std::cout << "Streaming frame features via Python..." << std::endl;
+        FILE* pipe = popen(cmd.str().c_str(), "r");
+        if (!pipe) {
+            std::cerr << "Failed to launch feature extraction helper." << std::endl;
+            return 1;
+        }
+
         std::vector<RecognitionResult> recognitions;
-        recognitions.reserve(feature_rows.size());
+        recognitions.reserve(16);
 
-        for (size_t i = 0; i < feature_rows.size(); ++i) {
-            const auto& row = feature_rows[i];
-            FrameFeatures feats;
-            feats.hand_shape.assign(row.begin(), row.begin() + 7);
-            feats.hand_position.assign(row.begin() + 7, row.begin() + 25);
-            feats.lips.assign(row.begin() + 25, row.end());
+        int total_frames = 0;
+        int valid_frames = 0;
+        int dropped_frames = 0;
+        int last_frame_number = 0;
 
-            bool ready = processor.push_frame(feats);
-            if (ready) {
-                auto partial = processor.process_window();
-                if (!partial.phonemes.empty()) {
-                    size_t idx = std::min(i, frame_numbers.size() - 1);
-                    partial.frame_number = frame_numbers[idx];
-                    recognitions.push_back(std::move(partial));
-                }
+        std::array<char, 8192> buffer{};
+        std::string pending_line;
+
+        auto process_line = [&](const std::string& raw_line) {
+            if (raw_line.empty()) {
+                return;
             }
+
+            if (raw_line.rfind("DATA,", 0) == 0) {
+                total_frames++;
+                valid_frames++;
+
+                std::string payload = raw_line.substr(5);
+                std::stringstream ss(payload);
+                std::string token;
+                if (!std::getline(ss, token, ',')) {
+                    return;
+                }
+
+                int frame_number = 0;
+                try {
+                    frame_number = std::stoi(token);
+                } catch (const std::exception&) {
+                    return;
+                }
+                last_frame_number = frame_number;
+
+                std::vector<float> values;
+                values.reserve(33);
+                while (std::getline(ss, token, ',')) {
+                    try {
+                        values.push_back(std::stof(token));
+                    } catch (const std::exception&) {
+                        values.push_back(0.0f);
+                    }
+                }
+
+                if (values.size() != 33) {
+                    std::cerr << "Warning: expected 33 feature values, received "
+                              << values.size() << " for frame " << frame_number << std::endl;
+                    return;
+                }
+
+                FrameFeatures feats;
+                feats.hand_shape.assign(values.begin(), values.begin() + 7);
+                feats.hand_position.assign(values.begin() + 7, values.begin() + 25);
+                feats.lips.assign(values.begin() + 25, values.end());
+
+                bool ready = processor.push_frame(feats);
+                if (ready) {
+                    auto partial = processor.process_window();
+                    if (!partial.phonemes.empty()) {
+                        partial.frame_number = frame_number;
+                        if (!recognitions.empty()) {
+                            recognitions.clear();
+                        }
+                        recognitions.push_back(std::move(partial));
+                    }
+                }
+            } else if (raw_line.rfind("DROP,", 0) == 0) {
+                total_frames++;
+                dropped_frames++;
+            }
+        };
+
+        while (true) {
+            char* chunk = std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe);
+            if (!chunk) {
+                if (!pending_line.empty()) {
+                    process_line(pending_line);
+                    pending_line.clear();
+                }
+                break;
+            }
+
+            pending_line.append(chunk);
+            if (!pending_line.empty() && pending_line.back() == '\n') {
+                while (!pending_line.empty() && (pending_line.back() == '\n' || pending_line.back() == '\r')) {
+                    pending_line.pop_back();
+                }
+                process_line(pending_line);
+                pending_line.clear();
+            }
+        }
+
+        int script_status = pclose(pipe);
+        if (script_status != 0) {
+            std::cerr << "Feature extraction helper exited with status " << script_status << std::endl;
         }
 
         auto final_partial = processor.finalize();
         if (!final_partial.phonemes.empty()) {
-            final_partial.frame_number = frame_numbers.back();
+            final_partial.frame_number = last_frame_number;
+            if (!recognitions.empty()) {
+                recognitions.clear();
+            }
             recognitions.push_back(std::move(final_partial));
         }
 
@@ -316,6 +320,31 @@ int main(int argc, char** argv) {
             }
         } else {
             std::cerr << "Warning: failed to initialize sentence corrector. Subtitles will show phonemes only." << std::endl;
+        }
+
+        std::cout << "\nTotal valid frames: " << valid_frames
+                  << " (out of " << total_frames << " total frames)";
+        if (dropped_frames > 0) {
+            std::cout << " -- dropped " << dropped_frames << " frames due to incomplete landmarks";
+        }
+        std::cout << std::endl;
+        std::cout << "Total chunks processed: " << processor.chunks_processed() << std::endl;
+
+        if (!recognitions.empty()) {
+            const auto& final_result = recognitions.back();
+            std::cout << "\nFinal phoneme sequence: ";
+            for (size_t i = 0; i < final_result.phonemes.size(); ++i) {
+                if (i > 0) {
+                    std::cout << ' ';
+                }
+                std::cout << final_result.phonemes[i];
+            }
+            std::cout << std::endl;
+            if (!final_result.french_sentence.empty()) {
+                std::cout << "French sentence: " << final_result.french_sentence << std::endl;
+            }
+        } else {
+            std::cout << "No decoded phoneme sequence available." << std::endl;
         }
 
         std::deque<RecognitionResult> recognition_deque(recognitions.begin(), recognitions.end());

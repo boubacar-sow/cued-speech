@@ -927,7 +927,9 @@ WindowProcessor::WindowProcessor(CTCDecoder* decoder, TFLiteSequenceModel* seque
       chunk_idx_(0),
       next_window_needed_(WINDOW_SIZE),
       frame_count_(0),
-      effective_vocab_size_(decoder ? decoder->get_vocab_size() : 0) {}
+      effective_vocab_size_(decoder ? decoder->get_vocab_size() : 0),
+      total_frames_seen_(0),
+      chunks_processed_(0) {}
 
 void WindowProcessor::reset() {
     valid_features_.clear();
@@ -936,9 +938,13 @@ void WindowProcessor::reset() {
     next_window_needed_ = WINDOW_SIZE;
     frame_count_ = 0;
     effective_vocab_size_ = decoder_ ? decoder_->get_vocab_size() : 0;
+    total_frames_seen_ = 0;
+    chunks_processed_ = 0;
 }
 
 bool WindowProcessor::push_frame(const FrameFeatures& features) {
+    total_frames_seen_++;
+
     if (!features.is_valid()) {
         return false;
     }
@@ -1061,6 +1067,8 @@ RecognitionResult WindowProcessor::process_window() {
             std::cout << token << ' ';
         }
         std::cout << std::endl;
+
+        ++chunks_processed_;
     }
 
     chunk_idx_++;
@@ -1234,9 +1242,27 @@ RecognitionResult WindowProcessor::finalize() {
     if (!hypotheses.empty()) {
         result.phonemes = decoder_->idxs_to_tokens(hypotheses[0].tokens);
         result.confidence = hypotheses[0].score;
+
+        ++chunks_processed_;
     }
 
     return result;
+}
+
+int WindowProcessor::valid_frame_count() const {
+    return static_cast<int>(valid_features_.size());
+}
+
+int WindowProcessor::total_frames_seen() const {
+    return total_frames_seen_;
+}
+
+int WindowProcessor::dropped_frame_count() const {
+    return total_frames_seen_ - static_cast<int>(valid_features_.size());
+}
+
+int WindowProcessor::chunks_processed() const {
+    return chunks_processed_;
 }
 
 //=============================================================================
@@ -1351,25 +1377,45 @@ std::string SentenceCorrector::correct(const std::vector<std::string>& liaphon_p
         return {};
     }
 
-    std::vector<std::string> ipa_tokens;
-    ipa_tokens.reserve(liaphon_phonemes.size());
+    std::string ipa_sentence;
+    ipa_sentence.reserve(liaphon_phonemes.size() * 2);
     for (const auto& phone : liaphon_phonemes) {
         auto it = LIAPHON_TO_IPA.find(phone);
         if (it != LIAPHON_TO_IPA.end()) {
-            ipa_tokens.push_back(it->second);
+            ipa_sentence += it->second;
         } else {
-            ipa_tokens.push_back(phone);
+            ipa_sentence += phone;
         }
+    }
+
+    std::vector<std::string> ipa_tokens;
+    std::string current;
+    for (char ch : ipa_sentence) {
+        if (std::isspace(static_cast<unsigned char>(ch))) {
+            if (!current.empty()) {
+                ipa_tokens.push_back(current);
+                current.clear();
+            }
+        } else {
+            current.push_back(ch);
+        }
+    }
+    if (!current.empty()) {
+        ipa_tokens.push_back(current);
+    }
+
+    if (ipa_tokens.empty() && !ipa_sentence.empty()) {
+        ipa_tokens.push_back(ipa_sentence);
     }
 
     std::vector<std::vector<std::string>> homophone_lists;
     homophone_lists.reserve(ipa_tokens.size());
-    for (const auto& ipa : ipa_tokens) {
-        auto it = ipa_to_homophones_.find(ipa);
-        if (it != ipa_to_homophones_.end()) {
+    for (const auto& token : ipa_tokens) {
+        auto it = ipa_to_homophones_.find(token);
+        if (it != ipa_to_homophones_.end() && !it->second.empty()) {
             homophone_lists.push_back(it->second);
         } else {
-            homophone_lists.push_back({ipa});
+            homophone_lists.push_back({token});
         }
     }
 

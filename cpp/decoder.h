@@ -321,6 +321,11 @@ public:
      */
     RecognitionResult finalize();
 
+    int valid_frame_count() const;
+    int total_frames_seen() const;
+    int dropped_frame_count() const;
+    int chunks_processed() const;
+
 private:
     CTCDecoder* decoder_;
     TFLiteSequenceModel* sequence_model_;
@@ -332,6 +337,8 @@ private:
     int next_window_needed_;
     int frame_count_;
     int effective_vocab_size_;
+    int total_frames_seen_;
+    int chunks_processed_;
     
     /**
      * Process a single window

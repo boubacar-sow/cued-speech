@@ -1,0 +1,16 @@
+#ifndef TENSORFLOW_LITE_PROFILING_TELEMETRY_C_TELEMETRY_SETTING_INTERNAL_H_
+#define TENSORFLOW_LITE_PROFILING_TELEMETRY_C_TELEMETRY_SETTING_INTERNAL_H_
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct TfLiteTelemetryInterpreterSettings TfLiteTelemetryInterpreterSettings;
+typedef struct TfLiteTelemetrySubgraphInfo TfLiteTelemetrySubgraphInfo;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  // TENSORFLOW_LITE_PROFILING_TELEMETRY_C_TELEMETRY_SETTING_INTERNAL_H_
+

@@ -219,11 +219,12 @@ int main(int argc, char** argv) {
         fs::path output_dir = repo_root / "output" / "cpp_demo";
         fs::create_directories(output_dir);
 
-        fs::path video_path = download_dir / "test_decode.mp4";
+        fs::path video_path = download_dir / "test_decode_mjpg.avi";
         fs::path model_path = download_dir / "cuedspeech_model_fixed_temporal.tflite";
         fs::path tokens_path = download_dir / "phonelist.csv";
         fs::path lexicon_path = download_dir / "lexicon.txt";
         fs::path kenlm_fr_path = download_dir / "kenlm_fr.bin";
+        fs::path kenlm_ipa_path = download_dir / "kenlm_ipa.binary";
         fs::path homophones_path = download_dir / "homophones_dico.jsonl";
         fs::path face_model_path = download_dir / "face_landmarker.task";
         fs::path hand_model_path = download_dir / "hand_landmarker.task";
@@ -256,7 +257,7 @@ int main(int argc, char** argv) {
         DecoderConfig config;
         config.lexicon_path = lexicon_path.string();
         config.tokens_path = tokens_path.string();
-        config.lm_path = kenlm_fr_path.string();
+        config.lm_path = kenlm_ipa_path.string();
         config.nbest = 1;
         config.beam_size = 40;
         config.beam_threshold = 50.0f;
@@ -318,7 +319,7 @@ int main(int argc, char** argv) {
         }
 
         std::deque<RecognitionResult> recognition_deque(recognitions.begin(), recognitions.end());
-        fs::path output_video = output_dir / "decoded_cpp.mp4";
+        fs::path output_video = output_dir / "decoded_cpp.avi";
         if (!write_subtitled_video(video_path.string(), recognition_deque, output_video.string(), 0.0)) {
             std::cerr << "Failed to write subtitled video." << std::endl;
             return 1;

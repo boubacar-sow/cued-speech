@@ -15,6 +15,9 @@
 #include <map>
 #include <deque>
 #include <unordered_map>
+#include <limits>
+
+#include <kenlm/lm/model.hh>
 
 // Forward declarations
 namespace fl {
@@ -25,12 +28,6 @@ class LexiconFreeDecoder;
 class Dictionary;
 class Trie;
 }
-}
-}
-
-namespace lm {
-namespace ngram {
-class Model;
 }
 }
 
@@ -213,7 +210,7 @@ private:
     std::unique_ptr<fl::lib::text::LexiconDecoder> lexicon_decoder_;
     std::unique_ptr<fl::lib::text::Dictionary> tokens_dict_;
     std::unique_ptr<fl::lib::text::Dictionary> word_dict_;
-    std::unique_ptr<fl::lib::text::Trie> trie_;
+    std::shared_ptr<fl::lib::text::Trie> trie_;
     std::unique_ptr<lm::ngram::Model> kenlm_model_;
     
     // Token indices

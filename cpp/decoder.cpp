@@ -302,8 +302,8 @@ bool CTCDecoder::initialize() {
         options.criterionType = CriterionType::CTC;
         
         // Create KenLM wrapper
-        auto lm = std::make_shared<KenLM>(config_.lm_path, word_dict_);
-        
+        auto lm = std::make_shared<KenLM>(config_.lm_path, *word_dict_);
+
         lexicon_decoder_ = std::make_unique<LexiconDecoder>(
             options,
             trie_,
@@ -326,7 +326,62 @@ bool CTCDecoder::initialize() {
 
 bool CTCDecoder::load_tokens() {
     try {
-        tokens_dict_ = std::make_unique<fl::lib::text::Dictionary>(config_.tokens_path);
+        std::ifstream vocab_stream(config_.tokens_path);
+        if (!vocab_stream.is_open()) {
+            std::cerr << "Error loading tokens: unable to open file "
+                      << config_.tokens_path << std::endl;
+            return false;
+        }
+
+        std::vector<std::string> vocabulary;
+        std::string line;
+        auto trim = [](std::string& s) {
+            auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+            s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space));
+            s.erase(std::find_if(s.rbegin(), s.rend(), not_space).base(), s.end());
+        };
+
+        while (std::getline(vocab_stream, line)) {
+            if (line.empty()) {
+                continue;
+            }
+            std::string token = line;
+            auto sep_pos = token.find_first_of(",;\t\r");
+            if (sep_pos != std::string::npos) {
+                token = token.substr(0, sep_pos);
+            }
+            trim(token);
+            if (token.empty()) {
+                continue;
+            }
+            if (std::find(vocabulary.begin(), vocabulary.end(), token) == vocabulary.end()) {
+                vocabulary.push_back(token);
+            }
+        }
+
+        // Ensure special tokens match Python pipeline behaviour
+        const std::vector<std::string> special_tokens = {
+            "<BLANK>", "<UNK>", "<SOS>", "<EOS>", "<PAD>"
+        };
+        for (auto it = special_tokens.rbegin(); it != special_tokens.rend(); ++it) {
+            const std::string& token = *it;
+            if (std::find(vocabulary.begin(), vocabulary.end(), token) == vocabulary.end()) {
+                vocabulary.insert(vocabulary.begin(), token);
+            }
+        }
+
+        // Guarantee <BLANK> is at index 0
+        if (vocabulary.empty()) {
+            vocabulary.push_back("<BLANK>");
+        } else if (vocabulary.front() != "<BLANK>") {
+            auto blank_pos = std::find(vocabulary.begin(), vocabulary.end(), "<BLANK>");
+            if (blank_pos != vocabulary.end()) {
+                vocabulary.erase(blank_pos);
+            }
+            vocabulary.insert(vocabulary.begin(), "<BLANK>");
+        }
+
+        tokens_dict_ = std::make_unique<fl::lib::text::Dictionary>(vocabulary);
         
         // Build token mappings
         for (int i = 0; i < tokens_dict_->indexSize(); ++i) {
@@ -339,6 +394,11 @@ bool CTCDecoder::load_tokens() {
         blank_idx_ = token_to_idx(config_.blank_token);
         sil_idx_ = token_to_idx(config_.sil_token);
         unk_idx_ = token_to_idx(config_.unk_word);
+
+        if (tokens_dict_) {
+            int default_idx = blank_idx_ >= 0 ? blank_idx_ : (unk_idx_ >= 0 ? unk_idx_ : 0);
+            tokens_dict_->setDefaultIndex(default_idx);
+        }
         
         if (blank_idx_ < 0) {
             std::cerr << "Warning: Blank token '" << config_.blank_token 
@@ -395,10 +455,10 @@ bool CTCDecoder::build_trie() {
         auto lexicon = loadWords(config_.lexicon_path);
         
         // Create trie
-        trie_ = std::make_unique<Trie>(tokens_dict_->indexSize(), sil_idx_);
+        trie_ = std::make_shared<Trie>(tokens_dict_->indexSize(), sil_idx_);
         
         // Create a temporary KenLM for scoring
-        auto temp_lm = std::make_shared<KenLM>(config_.lm_path, word_dict_);
+        auto temp_lm = std::make_shared<KenLM>(config_.lm_path, *word_dict_);
         auto start_state = temp_lm->start(false);
         
         // Insert words into trie
@@ -409,9 +469,18 @@ bool CTCDecoder::build_trie() {
             for (const auto& spelling : spellings) {
                 std::vector<int> spelling_idxs;
                 for (const auto& token : spelling) {
-                    spelling_idxs.push_back(tokens_dict_->getIndex(token));
+                    int token_idx = tokens_dict_->getIndex(token);
+                    if (token_idx < 0) {
+                        std::cerr << "Lexicon token '" << token
+                                  << "' not found in vocabulary" << std::endl;
+                        spelling_idxs.clear();
+                        break;
+                    }
+                    spelling_idxs.push_back(token_idx);
                 }
-                trie_->insert(spelling_idxs, word_idx, score);
+                if (!spelling_idxs.empty()) {
+                    trie_->insert(spelling_idxs, word_idx, score);
+                }
             }
         }
         
@@ -477,7 +546,9 @@ std::vector<CTCHypothesis> CTCDecoder::decode_log_probs(const float* log_probs, 
             
             // Convert word indices to strings
             for (int word_idx : result.words) {
-                hyp.words.push_back(word_dict_->getEntry(word_idx));
+                if (word_idx >= 0 && word_idx < static_cast<int>(word_dict_->indexSize())) {
+                    hyp.words.push_back(word_dict_->getEntry(word_idx));
+                }
             }
             
             results.push_back(hyp);
@@ -496,12 +567,42 @@ std::vector<CTCHypothesis> CTCDecoder::decode_log_probs(const float* log_probs, 
 std::vector<std::string> CTCDecoder::idxs_to_tokens(const std::vector<int>& indices) {
     std::vector<std::string> tokens;
     tokens.reserve(indices.size());
-    
+
     for (int idx : indices) {
         tokens.push_back(idx_to_token(idx));
     }
-    
-    return tokens;
+
+    if (tokens.size() >= 2) {
+        tokens.erase(tokens.begin());
+        tokens.pop_back();
+    }
+
+    std::vector<std::string> filtered;
+    filtered.reserve(tokens.size());
+    for (const auto& token : tokens) {
+        if (token.empty()) {
+            continue;
+        }
+        if (token == "<BLANK>" || token == "<PAD>" ||
+            token == "<SOS>" || token == "<EOS>") {
+            continue;
+        }
+        filtered.push_back(token);
+    }
+
+    std::vector<std::string> deduped;
+    deduped.reserve(filtered.size());
+    for (const auto& token : filtered) {
+        if (deduped.empty() || deduped.back() != token) {
+            deduped.push_back(token);
+        }
+    }
+
+    while (!deduped.empty() && deduped.back() == "_") {
+        deduped.pop_back();
+    }
+
+    return deduped;
 }
 
 int CTCDecoder::get_vocab_size() const {
@@ -1313,8 +1414,7 @@ std::vector<std::string> SentenceCorrector::beam_search(
 
     std::vector<Beam> beams;
     beams.reserve(beam_width);
-    lm::ngram::State start_state;
-    kenlm_model_->BeginSentenceState(&start_state);
+    lm::ngram::State start_state = kenlm_model_->BeginSentenceState();
     beams.push_back({0.0, start_state, {}});
 
     for (const auto& homophones : homophone_lists) {
@@ -1417,15 +1517,14 @@ bool write_subtitled_video(
     width &= ~1;
     height &= ~1;
 
-    std::string temp_output = output_path + ".noaudio.mp4";
     cv::VideoWriter writer(
-        temp_output,
-        cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
+        output_path,
+        cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
         video_fps,
         cv::Size(width, height));
 
     if (!writer.isOpened()) {
-        std::cerr << "Failed to open VideoWriter: " << temp_output << std::endl;
+        std::cerr << "Failed to open VideoWriter: " << output_path << std::endl;
         cap.release();
         return false;
     }
@@ -1483,16 +1582,6 @@ bool write_subtitled_video(
 
     writer.release();
     cap.release();
-
-    std::string command = "ffmpeg -y -i \"" + temp_output + "\" -i \"" + input_path +
-                          "\" -c:v copy -map 0:v:0 -map 1:a:0 -shortest \"" + output_path + "\"";
-    int ret = std::system(command.c_str());
-    if (ret == 0) {
-        std::remove(temp_output.c_str());
-    } else {
-        std::cerr << "ffmpeg command failed. Keeping video without audio." << std::endl;
-        std::rename(temp_output.c_str(), output_path.c_str());
-    }
 
     return true;
 }

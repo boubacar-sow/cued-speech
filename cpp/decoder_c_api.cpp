@@ -6,12 +6,19 @@
 #include "decoder.h"
 
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 #include <memory>
 #include <iostream>
 
-using namespace cued_speech;
+using cued_speech::CTCDecoder;
+using cued_speech::FrameFeatures;
+using cued_speech::SentenceCorrector;
+using cued_speech::TFLiteSequenceModel;
+using cued_speech::WindowProcessor;
+using cued_speech::ipa_to_liaphon;
+using cued_speech::liaphon_to_ipa;
 
 // Thread-local error message
 thread_local std::string g_last_error;
@@ -47,8 +54,8 @@ char** copy_string_vector(const std::vector<std::string>& vec) {
 // Decoder Configuration
 //=============================================================================
 
-DecoderConfig decoder_config_default() {
-    DecoderConfig config;
+::DecoderConfig decoder_config_default() {
+    ::DecoderConfig config;
     config.lexicon_path = nullptr;
     config.tokens_path = nullptr;
     config.lm_path = nullptr;
@@ -79,7 +86,7 @@ DecoderHandle decoder_create(const DecoderConfig* config) {
             return nullptr;
         }
         
-        DecoderConfig cpp_config;
+        cued_speech::DecoderConfig cpp_config;
         cpp_config.lexicon_path = config->lexicon_path ? config->lexicon_path : "";
         cpp_config.tokens_path = config->tokens_path ? config->tokens_path : "";
         cpp_config.lm_path = config->lm_path ? config->lm_path : "";
@@ -401,7 +408,7 @@ RecognitionResult* stream_process_window(StreamHandle handle) {
         auto ctx = static_cast<StreamContext*>(handle);
         auto result = ctx->processor->process_window();
 
-        auto c_result = new RecognitionResult;
+        auto c_result = new ::RecognitionResult;
         c_result->frame_number = result.frame_number;
         c_result->phonemes_length = result.phonemes.size();
         c_result->phonemes = copy_string_vector(result.phonemes);
@@ -427,7 +434,7 @@ RecognitionResult* stream_finalize(StreamHandle handle) {
         auto ctx = static_cast<StreamContext*>(handle);
         auto result = ctx->processor->finalize();
 
-        auto c_result = new RecognitionResult;
+        auto c_result = new ::RecognitionResult;
         c_result->frame_number = result.frame_number;
         c_result->phonemes_length = result.phonemes.size();
         c_result->phonemes = copy_string_vector(result.phonemes);
@@ -443,7 +450,7 @@ RecognitionResult* stream_finalize(StreamHandle handle) {
     }
 }
 
-void stream_free_result(RecognitionResult* result) {
+void stream_free_result(::RecognitionResult* result) {
     if (!result) {
         return;
     }
